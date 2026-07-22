@@ -38,8 +38,15 @@ if __name__ == '__main__':
 
                 docentes.append(docente)
 
-    saida_nome = str(ppgi_config['ano_fim_conferencia']) + '_' + ppgi_config['rec_out']
-    
-    ppgiu.gera_recredenciamento_csv(os.path.join(ppgi_config['dir_out'], saida_nome), docentes)
+    os.makedirs(ppgi_config['dir_out'], exist_ok=True)
+    ocorrencias_path = ppgi_config['publicacoes_ocorrencias']
+    ppgiu.gera_publicacoes_ocorrencias_csv(ocorrencias_path, docentes)
+    linhas = ppgiu.pd.read_csv(ocorrencias_path, dtype=str, keep_default_na=False).to_dict('records')
+    for linha in linhas:
+        linha['ano'] = int(linha['ano'])
+        linha['sequencia'] = int(linha.get('sequencia') or 0)
+    resultado = ppgiu.deduplicar_publicacoes(linhas, overrides=ppgiu.ler_overrides(ppgi_config['overrides_deduplicacao']))
+    prefixo = str(ppgi_config['ano_fim_conferencia'])
+    ppgiu.gera_deduplicacao_csvs(ppgi_config['dir_out'], prefixo, resultado)
     revisao_nome = str(ppgi_config['ano_fim_conferencia']) + '_qualis_revisao.csv'
     ppgiu.gera_qualis_revisao_csv(os.path.join(ppgi_config['dir_out'], revisao_nome), docentes)

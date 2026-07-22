@@ -1,4 +1,5 @@
 import json
+import os
 
 import pandas as pd
 
@@ -8,6 +9,8 @@ from PontuacaoPPGI.Conference import Conference
 from PontuacaoPPGI.Journal import Journal
 from PontuacaoPPGI.NotaInfo import NotaInfo
 from PontuacaoPPGI.PessoaPPGI import PessoaPPGI
+from Deduplicacao import deduplicar_publicacoes
+from Deduplicacao.core import ler_overrides
 
 def config_json(json_path: str):
     config_d = {}
@@ -38,9 +41,8 @@ def config_json(json_path: str):
 
         config_d['nota_info'] = json_parsed['config_pontuacao']
         
-        config_d['rec_in'] = json_parsed['arquivo_recredenciamento_corrigido']
-
-        config_d['rec_out'] = json_parsed['arquivo_recredenciamento_saida']
+        config_d['publicacoes_ocorrencias'] = json_parsed['arquivo_publicacoes_ocorrencias']
+        config_d['overrides_deduplicacao'] = json_parsed.get('arquivo_overrides_deduplicacao', 'DadosPPGI/input/publicacoes_deduplicacao_overrides.csv')
 
 
     return config_d
@@ -69,52 +71,93 @@ def create_csv_writer(path, nota_info: NotaInfo):
 
     return csv_file
 
-def docentes_by_csv(csv_path):
-    df = pd.read_csv(csv_path)
+def _linha_ocorrencia(docente, producao):
+    metadados = producao.get_metadados() if hasattr(producao, 'get_metadados') else None
+    p = getattr(metadados, 'proveniencia', None)
+    autores = getattr(metadados, 'autores_detalhados', ())
+    tipo = 'Periódico' if isinstance(producao, Journal) else 'Conferência'
+    local = producao.get_revista() if tipo == 'Periódico' else producao.get_venue()
+    resultado = producao.get_qualis_match() if isinstance(producao, Conference) else {}
+    return {
+        'schema_versao': '1', 'Docente': docente.get_nome(), 'tipo': tipo, 'ano': producao.get_ano(),
+        'titulo': producao.get_titulo(), 'venue': local, 'revista': local if tipo == 'Periódico' else '',
+        'issn': producao.get_issn() if tipo == 'Periódico' else getattr(metadados, 'issn', ''),
+        'doi': getattr(metadados, 'doi', ''), 'isbn': getattr(metadados, 'isbn', ''),
+        'autores': json.dumps([a.nome_citacao or a.nome for a in autores] or producao.get_autores(), ensure_ascii=False),
+        'curriculo_id': getattr(p, 'curriculo_id', ''), 'arquivo_xml': getattr(p, 'arquivo_xml', ''),
+        'sequencia': getattr(p, 'sequencia', 0), 'estrato': producao.get_estrato() or '',
+        'qualis_status': (resultado or {}).get('qualis_status', ''),
+        'qualis_requer_revisao': (resultado or {}).get('qualis_requer_revisao', False),
+        'qualis_candidatos': (resultado or {}).get('qualis_candidatos', ''),
+    }
 
-    docentes = {}
 
-    for index, row in df.iterrows():
-        nome = row['Docente']
-        tipo = row['Tipo']
-        if nome not in docentes:
-            docentes[nome] = PessoaPPGI(nome)
-        
-        if tipo == 'Conferência':
-            docentes[nome].insere_producao(Conference(int(row['Ano']), '', NaturezaTrabalho.COMPLETO, None, row['Título'], row['Local'], [nome], row['Qualis']))
-        elif tipo == 'Periódico':
-            docentes[nome].insere_producao(Journal(int(row['Ano']), '', '', NaturezaArtigo.COMPLETO, row['Título'], row['Local'], [nome], row['Qualis']))
-        
-    return list(docentes.values())
-
-
-def gera_recredenciamento_csv(csv_out_path: str, docentes: list[PessoaPPGI]):
-    all_prods = []
-
-    # Header
-    header = 'Docente Tipo Qualis Ano Local Título'.split()
-
+def gera_publicacoes_ocorrencias_csv(csv_out_path, docentes):
+    linhas = []
     for docente in docentes:
         for producao in docente.get_producoes():
-            classificacao = ''
-            if  isinstance(producao, Journal):
-                classificacao = 'Periódico'
-                local = producao.get_revista()
-            elif isinstance(producao, Conference):
-                # Considera apenas trabalho completo
-                if producao.get_natureza() is not NaturezaTrabalho.COMPLETO:
-                    continue
-                classificacao = 'Conferência'
-                local = producao.get_venue()
-            
-            if classificacao != '':
-                estrato = producao.get_estrato()
-                if estrato == None:
-                    estrato = 'Qualis não identificado'
-                all_prods.append({header[0]: docente.get_nome(), header[1]: classificacao, header[2]: estrato, header[3]: producao.get_ano(), header[4]: local, header[5]: producao.get_titulo()})       
+            if isinstance(producao, Journal) or (isinstance(producao, Conference) and producao.get_natureza() is NaturezaTrabalho.COMPLETO):
+                linhas.append(_linha_ocorrencia(docente, producao))
+    pd.DataFrame(linhas).to_csv(csv_out_path, index=False, encoding='utf-8-sig')
+    return linhas
 
-    df = pd.DataFrame(all_prods)
-    df.to_csv(csv_out_path, index=False)
+
+def _producao_por_linha(linha, canonical_id=''):
+    autores = json.loads(linha.get('autores') or '[]')
+    ano = int(linha['ano'])
+    if linha['tipo'] == 'Periódico':
+        producao = Journal(ano, '', linha.get('issn', ''), NaturezaArtigo.COMPLETO, linha.get('titulo', ''), linha.get('revista') or linha.get('venue', ''), autores, linha.get('estrato') or None)
+    else:
+        producao = Conference(ano, '', NaturezaTrabalho.COMPLETO, None, linha.get('titulo', ''), linha.get('venue', ''), autores, linha.get('estrato') or None)
+    producao._publicacao_canonica_id = canonical_id
+    return producao
+
+
+def docentes_por_ocorrencias(csv_path, overrides=()):
+    linhas = pd.read_csv(csv_path, dtype=str, keep_default_na=False).to_dict('records')
+    for linha in linhas:
+        linha['ano'] = int(linha['ano'])
+        linha['sequencia'] = int(linha.get('sequencia') or 0)
+    resultado = deduplicar_publicacoes(linhas, overrides=overrides)
+    linhas_por_id = {resultado.ids_ocorrencia[id(linha)]: linha for linha in linhas}
+    docentes = {}
+    vistos = set()
+    for ocorrencia_id, canonica_id in resultado.canonica_por_ocorrencia.items():
+        linha = linhas_por_id[ocorrencia_id]
+        chave = (linha['Docente'], canonica_id)
+        if chave in vistos: continue
+        vistos.add(chave)
+        docentes.setdefault(linha['Docente'], PessoaPPGI(linha['Docente'])).insere_producao(_producao_por_linha(linhas_por_id[canonica_id], canonica_id))
+    return list(docentes.values()), resultado
+
+
+def gera_deduplicacao_csvs(dir_out, prefixo, resultado):
+    linhas = []
+    for item in resultado.ocorrencias:
+        item_id = resultado.ids_ocorrencia[id(item)]
+        linha = dict(item) if isinstance(item, dict) else {}
+        linha.update({'ocorrencia_id': item_id, 'publicacao_canonica_id': resultado.canonica_por_ocorrencia[item_id]})
+        linhas.append(linha)
+    colunas_ocorrencias = ['schema_versao', 'Docente', 'tipo', 'ano', 'titulo', 'venue', 'revista', 'issn', 'doi', 'isbn', 'autores', 'curriculo_id', 'arquivo_xml', 'sequencia', 'estrato', 'qualis_status', 'qualis_requer_revisao', 'qualis_candidatos', 'ocorrencia_id', 'publicacao_canonica_id']
+    pd.DataFrame(linhas, columns=colunas_ocorrencias).to_csv(os.path.join(dir_out, prefixo + '_publicacoes_ocorrencias.csv'), index=False, encoding='utf-8-sig')
+    canonicas = [linha for linha in linhas if linha['ocorrencia_id'] == linha['publicacao_canonica_id']]
+    pd.DataFrame(canonicas, columns=colunas_ocorrencias).to_csv(os.path.join(dir_out, prefixo + '_publicacoes_unicas.csv'), index=False, encoding='utf-8-sig')
+    colunas_decisao = ['ocorrencia_a', 'ocorrencia_b', 'decisao', 'motivo', 'score_titulo']
+    pd.DataFrame([d.__dict__ for d in resultado.decisoes], columns=colunas_decisao).to_csv(os.path.join(dir_out, prefixo + '_deduplicacao_decisoes.csv'), index=False, encoding='utf-8-sig')
+    pd.DataFrame([d.__dict__ for d in resultado.revisoes], columns=colunas_decisao).to_csv(os.path.join(dir_out, prefixo + '_deduplicacao_revisao.csv'), index=False, encoding='utf-8-sig')
+
+
+# Compatibilidade de biblioteca para consumidores antigos. As etapas PPGI não
+# usam esta função e não aceitam este formato como entrada.
+def gera_recredenciamento_csv(csv_out_path, docentes):
+    linhas = []
+    for docente in docentes:
+        for producao in docente.get_producoes():
+            if isinstance(producao, Journal):
+                linhas.append({'Docente': docente.get_nome(), 'Tipo': 'Periódico', 'Qualis': producao.get_estrato() or 'Qualis não identificado', 'Ano': producao.get_ano(), 'Local': producao.get_revista(), 'Título': producao.get_titulo()})
+            elif isinstance(producao, Conference) and producao.get_natureza() is NaturezaTrabalho.COMPLETO:
+                linhas.append({'Docente': docente.get_nome(), 'Tipo': 'Conferência', 'Qualis': producao.get_estrato() or 'Qualis não identificado', 'Ano': producao.get_ano(), 'Local': producao.get_venue(), 'Título': producao.get_titulo()})
+    pd.DataFrame(linhas, columns=['Docente', 'Tipo', 'Qualis', 'Ano', 'Local', 'Título']).to_csv(csv_out_path, index=False)
 
 
 def gera_qualis_revisao_csv(csv_out_path: str, docentes: list[PessoaPPGI]):

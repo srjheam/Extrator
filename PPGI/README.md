@@ -64,12 +64,12 @@ python main-part1.py DadosPPGI/config.json
    - Conferências: `ano_inicio_conferencia` até `ano_fim_conferencia`
    - Periódicos: `ano_inicio_periodico` até `ano_fim_periodico`
 4. Classifica as produções usando os arquivos Qualis
-5. Gera o arquivo de saída: `DadosPPGI/saida/<ano>_recredenciamento.csv`
+5. Gera ocorrências enriquecidas e a deduplicação auditável
 
 **Saída gerada:**
-- `DadosPPGI/saida/2024_recredenciamento.csv`
-  - Colunas: Docente, Tipo, Qualis, Ano, Local, Título
-  - Lista todas as produções dos docentes com suas classificações
+- `DadosPPGI/saida/2024_publicacoes_ocorrencias.csv`: única entrada da Parte 2
+- `DadosPPGI/saida/2024_publicacoes_unicas.csv`: registros canônicos
+- `DadosPPGI/saida/2024_deduplicacao_decisoes.csv` e `2024_deduplicacao_revisao.csv`: auditoria
 
 ### Parte 2: Cálculo de Pontuação
 
@@ -80,7 +80,7 @@ python main-part2.py DadosPPGI/config.json
 ```
 
 **O que faz:**
-1. Lê o arquivo CSV gerado pela Parte 1 (`arquivo_recredenciamento_corrigido` no config)
+1. Lê o arquivo de ocorrências definido por `arquivo_publicacoes_ocorrencias`
 2. Para cada docente:
    - Agrupa as produções por estrato Qualis
    - Verifica a produção mínima (periódicos A1-A4 no intervalo especificado)
@@ -91,7 +91,7 @@ python main-part2.py DadosPPGI/config.json
 **Saídas geradas:**
 - `DadosPPGI/saida/<ano>_docente.csv`: Pontuação individual de cada docente
   - Colunas: Docente, Bolsista de Produtividade, Nota Docente, Produção Mínima, Validação de Regras
-- `DadosPPGI/saida/<ano>_grupo.csv`: Pontuação geral do grupo/programa
+- `DadosPPGI/saida/<ano>_grupo.csv`: Pontuação geral do grupo/programa. Não é gerado quando há revisão Qualis pendente no intervalo.
 
 ## 📊 Regras de Pontuação
 
@@ -197,7 +197,7 @@ Edite `DadosPPGI/config-pontuacao.json`:
 
 2. **Conferências**: Apenas trabalhos completos são considerados no cálculo.
 
-3. **Correções manuais**: É possível editar manualmente o arquivo `2024_recredenciamento.csv` antes de executar a Parte 2 para corrigir classificações Qualis ou incluir/remover produções.
+3. **Correções manuais**: Use somente `DadosPPGI/input/publicacoes_deduplicacao_overrides.csv`. Não edite o CSV de ocorrências.
 
 4. **Qualis não identificado**: Produções sem classificação Qualis aparecerão com a tag "Qualis não identificado" no CSV intermediário.
 
@@ -214,8 +214,8 @@ pip install -r requirements.txt
 cd PPGI
 python main-part1.py DadosPPGI/config.json
 
-# 3. (Opcional) Revisar e corrigir o arquivo gerado
-# DadosPPGI/saida/2024_recredenciamento.csv
+# 3. (Opcional) Registrar correções de deduplicação
+# DadosPPGI/input/publicacoes_deduplicacao_overrides.csv
 
 # 4. Executar Parte 2
 python main-part2.py DadosPPGI/config.json

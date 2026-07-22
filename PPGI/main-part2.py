@@ -21,7 +21,10 @@ if __name__ == '__main__':
     
     ppgi_config = ppgiu.config_json(args.config.name)
     
-    docentes = ppgiu.docentes_by_csv(ppgi_config['rec_in'])
+    docentes, resultado = ppgiu.docentes_por_ocorrencias(
+        ppgi_config['publicacoes_ocorrencias'],
+        ppgiu.ler_overrides(ppgi_config['overrides_deduplicacao']),
+    )
 
     pontuacoes = []
 
@@ -44,7 +47,15 @@ if __name__ == '__main__':
     
     file.close()
 
+    nota_intervalo = nota_info.get_nota_intervalo()
+    revisao_no_intervalo = any(
+        linha.get('tipo') == 'Conferência' and str(linha.get('qualis_requer_revisao', '')).lower() == 'true'
+        and nota_intervalo[0] <= int(linha.get('ano', 0)) <= nota_intervalo[1]
+        for linha in ppgiu.pd.read_csv(ppgi_config['publicacoes_ocorrencias'], dtype=str, keep_default_na=False).to_dict('records')
+    )
     try:
+        if revisao_no_intervalo:
+            raise ValueError('Há conferências com revisão Qualis pendente no intervalo de pontuação.')
         arquivo_geral = os.path.join(ppgi_config['dir_out'], get_nome_prefix(ppgi_config['geral_file'], ppgi_config))
         PontuacaoTotal.calcula_nota_geral(docentes, nota_info, arquivo_geral)
     except ValueError as e:

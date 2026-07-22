@@ -34,6 +34,7 @@ class QualisConferencia:
         if path_2021_2024:
             argumentos["path_2025"] = str(Path(path_2021_2024))
         self._db = QualisDB(**argumentos)
+        self._cache = {}
 
     def get_match(
         self,
@@ -54,12 +55,16 @@ class QualisConferencia:
                 stacklevel=2,
             )
             ano = 2020
-        resultado = match(
-            nome_conferencia=venue,
-            ano=ano,
-            sigla_conferencia=sigla,
-            db=self._db,
-        )
+        chave_cache = (venue or "", ano, sigla or "")
+        resultado = self._cache.get(chave_cache)
+        if resultado is None:
+            resultado = match(
+                nome_conferencia=venue,
+                ano=ano,
+                sigla_conferencia=sigla,
+                db=self._db,
+            )
+            self._cache[chave_cache] = resultado
         diagnostico = {
             chave: valor
             for chave, valor in resultado.items()
