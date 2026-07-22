@@ -2,6 +2,21 @@
 
 Ferramenta de linha de comando para associar publicações em anais de conferências às suas classificações **Qualis CAPES** (quadriênios 2017-2020 e 2021-2024), sem depender de modelos de linguagem para os casos mais simples.
 
+## Contrato atual
+
+O fluxo sem `--modelo` usa somente `EXATO`, `AUTO_FUZZY` e `REVISAO_MANUAL`.
+Nunca acessa Ollama ou rede. `AUTO_FUZZY` exige score `>= 88`, margem `>= 8` e
+sinais estruturais compatíveis. Casos ambíguos ficam em revisão; não recebem
+estrato. A API legada é `QualisConferencia.get_match(venue, ano, sigla=None)` e
+`get_estrato(venue, ano=None, sigla=None)`. Sem ano, ela avisa depreciação e usa
+a semântica legada 2017-2020.
+
+As bases canônicas ficam em `base/`. Use
+`python QualisLens/scripts/import_sucupira_csv.py oficial.csv base/qualis_2017_2020.csv`
+para importar CSV oficial. `base/metadata.json` registra origem e contagem.
+`Classificador/qualis_conferencias.csv` é caminho histórico compatível; o PPGI
+o redireciona para a fonte canônica.
+
 ---
 
 ## Índice

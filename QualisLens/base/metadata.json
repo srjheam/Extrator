@@ -1,0 +1,10 @@
+{
+  "fonte": "CAPES Sucupira Qualis Eventos",
+  "area": "Ciência da Computação",
+  "formato": "Sigla, Nome do evento, Estrato",
+  "periodos": {
+    "2017-2020": {"arquivo": "qualis_2017_2020.csv", "contagem": 1404, "sha256": "3f2108e138243baca525ecc65c62998e647be1ae4f919b2b13c0826a67df16ed"},
+    "2021-2024": {"arquivo": "qualis_2021_2024.csv", "contagem": 781, "sha256": "76783e7728c29c2c8b992e8c7c9b97b8312d5fa5ae9b752d5f03aede20bba4a7"}
+  },
+  "observacao": "Atualize hashes após importar arquivo oficial com scripts/import_sucupira_csv.py."
+}
