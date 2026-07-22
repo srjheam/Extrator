@@ -4,5 +4,11 @@
   "arquivo_deduplicacao_revisao": "DadosPPGI/saida/2024_deduplicacao_revisao.csv",
   "diretorio_saida": "DadosPPGI/saida",
   "arquivo_cache": "DadosPPGI/saida/metricas.sqlite",
-  "provedores": ["crossref", "openalex"]
+  "provedores_identidade": ["crossref"],
+  "provedores_citacoes": ["google_scholar", "openalex"],
+  "estrategia_provedores": "fallback",
+  "google_scholar": {
+    "intervalo_minimo_segundos": 2.5,
+    "jitter_segundos": 1.0
+  }
 }
