@@ -103,10 +103,14 @@ cd PPGI
 python main-metricas.py DadosPPGI/config-metricas.json
 ```
 
-Use `--offline` para exportar somente dados do cache SQLite. O comando usa
-Crossref e OpenAlex. Cada contagem mantém o nome da fonte e o `snapshot_id`.
-Publicações sem DOI vão para `*_metricas_revisao.csv`. O comando não faz busca
-automática por título e não acessa Google Scholar, Scopus, Web of Science ou JCR.
+Use `--offline` para exportar somente dados do cache SQLite. O comando consulta
+o Google Scholar como fonte principal de citações. Se o Scholar não resolver a
+publicação, o comando usa OpenAlex como fallback. Crossref valida identidades
+por DOI como fonte auxiliar.
+
+Cada contagem mantém o nome da fonte, o papel do provedor e o `snapshot_id`.
+Publicações ambíguas vão para `*_metricas_revisao.csv`. O arquivo
+`*_metricas_ranking.csv` mantém rankings separados por fonte.
 
 ## 📊 Regras de Pontuação
 
