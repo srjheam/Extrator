@@ -1,0 +1,8 @@
+{
+  "arquivo_publicacoes_unicas": "DadosPPGI/saida/2024_publicacoes_unicas.csv",
+  "arquivo_publicacoes_ocorrencias": "DadosPPGI/saida/2024_publicacoes_ocorrencias.csv",
+  "arquivo_deduplicacao_revisao": "DadosPPGI/saida/2024_deduplicacao_revisao.csv",
+  "diretorio_saida": "DadosPPGI/saida",
+  "arquivo_cache": "DadosPPGI/saida/metricas.sqlite",
+  "provedores": ["crossref", "openalex"]
+}
