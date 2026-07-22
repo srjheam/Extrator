@@ -115,3 +115,28 @@ def gera_recredenciamento_csv(csv_out_path: str, docentes: list[PessoaPPGI]):
 
     df = pd.DataFrame(all_prods)
     df.to_csv(csv_out_path, index=False)
+
+
+def gera_qualis_revisao_csv(csv_out_path: str, docentes: list[PessoaPPGI]):
+    """Exporta diagnósticos de conferências sem decisão automática."""
+    linhas = []
+    for docente in docentes:
+        for producao in docente.get_producoes():
+            if not isinstance(producao, Conference):
+                continue
+            resultado = producao.get_qualis_match() or {}
+            if not resultado.get("qualis_requer_revisao"):
+                continue
+            linhas.append({
+                "Docente": docente.get_nome(),
+                "Título": producao.get_titulo(),
+                "Ano": producao.get_ano(),
+                "Evento informado": producao.get_venue(),
+                "Status": resultado.get("qualis_status"),
+                "Candidatos": resultado.get("qualis_candidatos"),
+                "Score primeiro": resultado.get("qualis_score_fuzzy"),
+                "Margem segundo": resultado.get("qualis_score_margem"),
+                "Motivo": resultado.get("qualis_obs") or resultado.get("qualis_llm_motivo"),
+            })
+    colunas = ["Docente", "Título", "Ano", "Evento informado", "Status", "Candidatos", "Score primeiro", "Margem segundo", "Motivo"]
+    pd.DataFrame(linhas, columns=colunas).to_csv(csv_out_path, index=False, encoding="utf-8-sig")

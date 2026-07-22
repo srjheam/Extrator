@@ -41,3 +41,5 @@ if __name__ == '__main__':
     saida_nome = str(ppgi_config['ano_fim_conferencia']) + '_' + ppgi_config['rec_out']
     
     ppgiu.gera_recredenciamento_csv(os.path.join(ppgi_config['dir_out'], saida_nome), docentes)
+    revisao_nome = str(ppgi_config['ano_fim_conferencia']) + '_qualis_revisao.csv'
+    ppgiu.gera_qualis_revisao_csv(os.path.join(ppgi_config['dir_out'], revisao_nome), docentes)
