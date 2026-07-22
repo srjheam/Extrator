@@ -10,11 +10,11 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from utils import strip_accents as _strip_accents
+from .utils import strip_accents as _strip_accents
 
 import pandas as pd
 
-from constants import (
+from .constants import (
     ANO_FIM_ANTIGO,
     ANO_FIM_RECENTE,
     ANO_INICIO_ANTIGO,
@@ -24,7 +24,7 @@ from constants import (
     QUADRIENIO_ANTIGO,
     QUADRIENIO_RECENTE,
 )
-from preprocessor import extrair_acronimo
+from .preprocessor import extrair_acronimo, normalizar
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,30 @@ def _carregar_csv(path: str, quadrienio: str) -> pd.DataFrame:
     pd.DataFrame
         DataFrame com colunas padronizadas + quadrienio.
     """
-    df = pd.read_csv(path)
+    arquivo = Path(path)
+    if not arquivo.is_file():
+        raise FileNotFoundError(f"Base Qualis não encontrada: {arquivo}")
+
+    # As bases novas usam CSV com cabeçalho. O classificador antigo do projeto
+    # usa TSV sem cabeçalho; ele contém a mesma estrutura do período 2017-2020
+    # e continua aceito para não quebrar configurações existentes.
+    df = pd.read_csv(arquivo, encoding="utf-8-sig")
+    colunas_esperadas = {"Sigla", "Nome do evento", "Estrato"}
+    if not colunas_esperadas.issubset(df.columns):
+        df = pd.read_csv(
+            arquivo,
+            sep="\t",
+            header=None,
+            names=["Sigla", "Nome do evento", "Estrato"],
+            usecols=[0, 1, 2],
+            encoding="utf-8-sig",
+        )
+
+    ausentes = colunas_esperadas - set(df.columns)
+    if ausentes:
+        raise ValueError(
+            f"Base Qualis inválida em {arquivo}: colunas ausentes {sorted(ausentes)}"
+        )
     df = df.rename(columns={
         "Sigla": _COL_SIGLA,
         "Nome do evento": _COL_NOME,
@@ -162,7 +185,7 @@ class QualisDB:
 
         # Campos normalizados para busca
         self.df[_COL_SIGLA_NORM] = self.df[_COL_SIGLA].apply(_normalizar_campo)
-        self.df[_COL_NOME_NORM] = self.df[_COL_NOME].apply(_normalizar_campo)
+        self.df[_COL_NOME_NORM] = self.df[_COL_NOME].apply(normalizar)
 
         # Acrônimo pré-computado para matching secundário
         self.df["acronimo"] = self.df[_COL_NOME].apply(
@@ -210,11 +233,19 @@ class QualisDB:
         """
         quadrienio, extrapolado = _resolver_quadrienio(ano)
         subset = self._subset_por_quadrienio(quadrienio)
-        termo_norm = _normalizar_campo(sigla_ou_nome)
+        termo_norm = (
+            _normalizar_campo(sigla_ou_nome)
+            if por_sigla
+            else normalizar(sigla_ou_nome)
+        )
+        if not termo_norm:
+            return None
 
         campo_busca = _COL_SIGLA_NORM if por_sigla else _COL_NOME_NORM
         mascara = subset[campo_busca] == termo_norm
-        resultados = subset[mascara]
+        resultados = subset[mascara].drop_duplicates(
+            subset=[_COL_SIGLA, _COL_NOME, _COL_ESTRATO, _COL_QUADRIENIO]
+        )
 
         if resultados.empty:
             return None
@@ -285,12 +316,14 @@ class QualisDB:
         subset_alt = self._subset_por_quadrienio(quadrienio_alternativo)
         for campo_busca, termo in [
             (_COL_SIGLA_NORM, _normalizar_campo(sigla) if sigla else None),
-            (_COL_NOME_NORM, _normalizar_campo(nome) if nome else None),
+            (_COL_NOME_NORM, normalizar(nome) if nome else None),
         ]:
             if not termo:
                 continue
             mascara = subset_alt[campo_busca] == termo
-            resultados = subset_alt[mascara]
+            resultados = subset_alt[mascara].drop_duplicates(
+                subset=[_COL_SIGLA, _COL_NOME, _COL_ESTRATO, _COL_QUADRIENIO]
+            )
             if not resultados.empty:
                 row = resultados.iloc[0]
                 logger.info(

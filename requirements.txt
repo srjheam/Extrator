@@ -2,3 +2,5 @@ pandas
 tqdm
 networkx
 Levenshtein
+rapidfuzz>=3.0
+requests>=2.28

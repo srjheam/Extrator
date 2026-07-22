@@ -13,7 +13,7 @@ from typing import Optional
 
 import pandas as pd
 
-from constants import STATUSES_REVISAO, STATUS_EXATO, STATUS_AUTO_FUZZY
+from .constants import STATUSES_REVISAO, STATUS_EXATO, STATUS_AUTO_FUZZY
 
 logger = logging.getLogger(__name__)
 
@@ -21,9 +21,12 @@ logger = logging.getLogger(__name__)
 COLUNAS_OUTPUT = [
     "qualis_estrato",
     "qualis_status",
+    "qualis_requer_revisao",
+    "qualis_sigla",
     "qualis_nome_oficial",
     "qualis_quadrienio",
     "qualis_score_fuzzy",
+    "qualis_score_margem",
     "qualis_score_llm",
     "llm_m1_modelo",
     "llm_m1_confianca",
@@ -171,11 +174,14 @@ def exportar_csv(
     # Reordenar colunas: entrada → resultado → diagnóstico → detalhe LLM → obs
     _ordem_qualis = [
         "qualis_estrato",
+        "qualis_sigla",
         "qualis_nome_oficial",
         "qualis_quadrienio",
         "passou_fuzzy",
         "qualis_score_fuzzy",
+        "qualis_score_margem",
         "qualis_status",
+        "qualis_requer_revisao",
         "confiabilidade",
         "qualis_score_llm",
         "llm_m1_modelo",
