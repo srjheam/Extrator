@@ -93,6 +93,21 @@ python main-part2.py DadosPPGI/config.json
   - Colunas: Docente, Bolsista de Produtividade, Nota Docente, Produção Mínima, Validação de Regras
 - `DadosPPGI/saida/<ano>_grupo.csv`: Pontuação geral do grupo/programa. Não é gerado quando há revisão Qualis pendente no intervalo.
 
+### Métricas externas (opcional)
+
+Esta etapa lê somente as publicações canônicas da Parte 1. Ela não muda a
+pontuação nem os arquivos `*_grupo.csv`.
+
+```powershell
+cd PPGI
+python main-metricas.py DadosPPGI/config-metricas.json
+```
+
+Use `--offline` para exportar somente dados do cache SQLite. O comando usa
+Crossref e OpenAlex. Cada contagem mantém o nome da fonte e o `snapshot_id`.
+Publicações sem DOI vão para `*_metricas_revisao.csv`. O comando não faz busca
+automática por título e não acessa Google Scholar, Scopus, Web of Science ou JCR.
+
 ## 📊 Regras de Pontuação
 
 As regras são definidas no arquivo `config-pontuacao.json`:
