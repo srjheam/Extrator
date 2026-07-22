@@ -1,11 +1,11 @@
 """Testes unitários para o algoritmo de matching fuzzy (matcher.py)."""
 
 import pytest
-from matcher import _score_hibrido, _token_level_fuzzy, match
-from constants import (
+from QualisLens.qualislens.matcher import _score_hibrido, _token_level_fuzzy, match
+from QualisLens.qualislens.constants import (
     STATUS_AUTO_FUZZY,
     STATUS_EXATO,
-    STATUS_LLM_MISS,
+    STATUS_REVISAO_MANUAL,
     THRESHOLD_AUTO,
     THRESHOLD_CANDIDATOS_RUINS,
 )
@@ -178,16 +178,16 @@ class TestMatch:
         result = match("Int'l Symp. on Cluster, Cloud and Grid Computing", 2021, None, db)
         assert not result.get("_precisa_llm", False)
 
-    # ── Casos LLM_MISS (score muito baixo, sem LLM) ──────────────────────────
+    # ── Casos sem decisão automática ─────────────────────────────────────────
 
-    def test_llm_miss_nome_totalmente_diferente(self, db):
+    def test_revisao_nome_totalmente_diferente(self, db):
         # Nome sem nenhuma relação com qualquer conferência conhecida
         result = match("zzz xqqq fyyyy 123456789", 2022, None, db)
-        assert result["qualis_status"] == STATUS_LLM_MISS
+        assert result["qualis_status"] == STATUS_REVISAO_MANUAL
         assert result["qualis_estrato"] is None
         assert result["qualis_score_fuzzy"] < THRESHOLD_CANDIDATOS_RUINS
 
-    def test_llm_miss_sem_llm_necessario(self, db):
+    def test_revisao_sem_llm_necessario(self, db):
         # Score muito baixo → não precisa de LLM (candidatos são ruído)
         result = match("zzz xqqq fyyyy 123456789", 2022, None, db)
         assert result.get("_precisa_llm") is False
@@ -199,12 +199,12 @@ class TestMatch:
         # Este teste verifica o campo _precisa_llm quando aplicável
         result = match("Wksp Embedded Systems Security", 2020, None, db)
         if result.get("_precisa_llm"):
-            assert result["qualis_status"] is None
+            assert result["qualis_status"] == STATUS_REVISAO_MANUAL
             s = result["qualis_score_fuzzy"]
             assert THRESHOLD_CANDIDATOS_RUINS <= s < THRESHOLD_AUTO
         else:
-            # Pode ter resolvido em AUTO_FUZZY ou LLM_MISS — também válido
-            assert result["qualis_status"] in (STATUS_AUTO_FUZZY, STATUS_LLM_MISS)
+            # Pode ter resolvido em AUTO_FUZZY ou exigido revisão — também válido
+            assert result["qualis_status"] in (STATUS_AUTO_FUZZY, STATUS_REVISAO_MANUAL)
 
     # ── Campos obrigatórios no retorno ───────────────────────────────────────
 

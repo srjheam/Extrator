@@ -1,8 +1,8 @@
 """Testes unitários para QualisDB (qualis_db.py)."""
 
 import pytest
-from qualis_db import QualisDB, _resolver_quadrienio
-from constants import QUADRIENIO_ANTIGO, QUADRIENIO_RECENTE
+from QualisLens.qualislens.qualis_db import QualisDB, _resolver_quadrienio
+from QualisLens.qualislens.constants import QUADRIENIO_ANTIGO, QUADRIENIO_RECENTE
 
 
 class TestResolverQuadrienio:
