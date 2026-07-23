@@ -1,265 +1,94 @@
 # ExtratorLattes
 
-Este repositório contém um sistema completo para processar currículos da Plataforma Lattes (CNPq) e calcular pontuações acadêmicas baseadas em critérios específicos de programas de pós-graduação e editais de iniciação científica.
+O ExtratorLattes lê currículos XML da Plataforma Lattes e produz dados para
+avaliação de programas de pós-graduação. A pipeline atual do PPGI classifica
+publicações, deduplica registros entre docentes, calcula pontuações e, de modo
+opcional, gera métricas externas.
 
-## 📋 Índice
+## Pipeline PPGI
 
-- [Visão Geral](#visão-geral)
-- [Estrutura do Projeto](#estrutura-do-projeto)
-- [Módulos Principais](#módulos-principais)
-  - [ArquivoInterno](#arquivointerno)
-  - [Classificador](#classificador)
-  - [QualisNovo](#qualisnovo)
-- [Aplicações](#aplicações)
-  - [PIIC](#piic---programa-de-iniciação-científica)
-  - [PPGI](#ppgi---programa-de-pós-graduação)
-- [Instalação](#instalação)
-- [Como Usar](#como-usar)
-- [Dependências](#dependências)
-- [Contribuindo](#contribuindo)
+```text
+XML Lattes
+  -> Parte 1: classificação Qualis e deduplicação
+  -> publicações canônicas e arquivos de auditoria
+  -> Parte 2: pré-verificação e pontuação
+  -> relatórios de docentes e do programa
 
----
-
-## 🎯 Visão Geral
-
-O sistema foi desenvolvido para automatizar o processo de avaliação de produção científica de pesquisadores, utilizando os dados disponíveis nos currículos Lattes em formato XML. O projeto implementa:
-
-- **Parsing de currículos Lattes**: Extração estruturada de produções científicas.
-- **Classificação Qualis**: Integração com o sistema Qualis CAPES para periódicos e conferências.
-- **Cálculo de pontuação**: Aplicação de regras específicas de editais e programas.
-- **Geração de relatórios**: Outputs em HTML, TXT e CSV.
-
----
-
-## 📁 Estrutura do Projeto
-
-```
-calculo-nota-a/
-├── ArquivoInterno/          # Módulo para parsing de currículos Lattes
-├── Classificador/           # Classificação Qualis de publicações
-├── QualisNovo/              # Geração de arquivos Qualis unificados
-├── PIIC/                    # Aplicação para Programa de Iniciação Científica
-├── PPGI/                    # Aplicação para Programa de Pós-Graduação
-├── docs/                    # Documentação e diagramas
-└── requirements.txt         # Dependências Python
+publicações canônicas
+  -> Métricas externas opcionais
+  -> snapshot SQLite e ranking de citações
 ```
 
----
+1. A Parte 1 lê os XMLs, classifica periódicos e eventos, e deduplica
+   publicações entre docentes.
+2. A Parte 2 só calcula a pontuação quando não existem revisões pendentes de
+   Qualis ou deduplicação no intervalo avaliado.
+3. As métricas externas não alteram a pontuação.
 
-## 🔧 Módulos Principais
+## Componentes
 
-### ArquivoInterno
+- `ArquivoInterno/`: leitura do XML Lattes e metadados de proveniência.
+- `Classificador/`: classificação Qualis de periódicos e integração do
+  QualisLens para eventos.
+- `QualisLens/`: associação conservadora de eventos ao Qualis CAPES e scripts
+  para atualizar as bases Sucupira.
+- `Deduplicacao/`: formação de publicações canônicas e fila de revisão.
+- `Metricas/`: snapshots, cache SQLite e relatórios de métricas externas.
+- `PPGI/`: comandos da pipeline de avaliação do PPGI.
+- `PIIC/`: aplicação independente para editais de iniciação científica.
 
-Módulo responsável pelo parsing e extração de dados dos currículos Lattes em formato XML.
+## Executar o PPGI
 
-As classes e enums foram baseados no documento XSD disponibilizado na [plataforma lattes](https://lattes.cnpq.br/), ele define a configuração dos currículos em XML. Esse arquivo também pode ser encontrado na pasta **docs/**.
-
-#### Componentes principais:
-
-**`CurriculoXML.py`**
-- Classe principal para ler e extrair informações de currículos Lattes
-- Métodos para extração de diferentes tipos de produções:
-  - `get_artigo()`: Artigos em periódicos.
-  - `get_trabalho_evento()`: Trabalhos em eventos/conferências.
-  - `get_livro()`: Livros publicados.
-  - `get_capitulo_livro()`: Capítulos de livro.
-  - `get_orientacao_md()`: Orientações de mestrado e doutorado.
-  - `get_orientacao_mti()`: Orientações de TCC e iniciação científica.
-  - `get_registro_patente()`: Registros de patentes.
-  - `get_artistica_cultural()`: Produções artísticas e culturais.
-  - E outros tipos de produções acadêmicas.
-
-**`PessoaLATTES.py`**
-- Classe que representa um pesquisador
-- Métodos:
-  - `carrega_curriculo()`: Carrega todas as produções de um período específico.
-  - `get_producoes()`: Retorna lista de todas as produções.
-  - `get_nivel_academico()`: Retorna nível acadêmico (graduação, mestrado, doutorado).
-
-**`Producao.py`**
-- Hierarquia de classes representando diferentes tipos de produções.
-
-**Subpasta `enums/`**
-- Enumerações para classificação de produções.
-
-#### Exemplo de uso:
-
-```python
-from ArquivoInterno.CurriculoXML import CurriculoXML
-
-# Carregar currículo
-curriculo = CurriculoXML("caminho/para/curriculo.xml")
-
-# Extrair nome
-nome = curriculo.get_nome()
-
-# Extrair artigos de 2020 a 2024
-artigos = curriculo.get_artigo(2020, 2024)
-
-# Extrair todas as produções
-producoes = curriculo.get_all_producoes(2020, 2024)
-```
-
----
-
-### Classificador
-
-Módulo para classificação de publicações usando o sistema Qualis CAPES.
-
-#### Componentes:
-
-**`Qualis.py`**
-- Classifica periódicos científicos usando ISSN
-- Métodos:
-  - `get_estrato(issn)`: Retorna o estrato Qualis (A1, A2, B1, B2, etc.).
-- Reconhece ISSNs nos formatos: `xxxxxxxx` ou `xxxx-xxxx`.
-
-**`QualisConferencia.py`**
-- Classifica conferências/eventos usando nome do evento.
-- Métodos:
-  - `get_estrato(venue)`: Retorna o estrato Qualis da conferência.
-- Utiliza algoritmo de similaridade Levenshtein para matching fuzzy.
-- Threshold de 85% de similaridade para matches.
-
-#### Arquivos de dados:
-
-- `qualis-unificado.csv`: Projeção oficial de periódicos para a Parte 1.
-- `base/qualis_periodicos_2021_2024.csv`: Base canônica de periódicos.
-- `qualis_conferencias.csv`: Base de conferências.
-
-Use `QualisLens/scripts/atualizar_sucupira.py` para atualizar os eventos e os
-periódicos oficiais. Esse fluxo não adiciona aliases de ISSN do Scopus, JCR ou
-de outras fontes.
-
-#### Exemplo de uso:
-
-```python
-from Classificador.Qualis import Qualis
-from Classificador.QualisConferencia import QualisConferencia
-
-# Classificar periódico
-qualis_journal = Qualis("Classificador/qualis-unificado.csv")
-estrato = qualis_journal.get_estrato("1234-5678")  # Retorna "A1", "B2", etc.
-
-# Classificar conferência
-qualis_conf = QualisConferencia("Classificador/qualis_conferencias.csv")
-estrato = qualis_conf.get_estrato("International Conference on Software Engineering")
-```
-
----
-
-## 📊 Aplicações
-
-### PIIC - Programa de Iniciação Científica
-
-Aplicação para avaliação de orientadores em editais de iniciação científica.
-
-#### Estrutura:
-
-```
-PIIC/
-├── main.py                    # Script principal
-├── DadosPIIC/                 # Dados de entrada
-│   ├── config.json            # Configurações
-│   ├── orientadores.csv       # Lista de orientadores
-│   ├── tabela_edital_PIIC_2025.json  # Regras de pontuação
-│   └── Curriculos/            # XMLs dos currículos
-├── PontuacaoPIIC/             # Módulos de cálculo
-└── Resultados/                # Relatórios gerados
-```
-
-#### Como executar:
+Instale as dependências na raiz do repositório:
 
 ```bash
-cd PIIC
-python main.py DadosPIIC/config.json
+python -m pip install -r requirements.txt
 ```
 
-#### Saídas geradas:
-
-- `{CPF}.html`: Relatório detalhado em HTML
-- `{CPF}.txt`: Relatório em texto
-- `resultados.csv`: Resumo de todos os orientadores
-
----
-
-### PPGI - Programa de Pós-Graduação
-
-Aplicação para avaliação de docentes em programas de pós-graduação.
-
-#### Estrutura:
-
-```
-PPGI/
-├── main-part1.py              # Processamento de produções
-├── main-part2.py              # Cálculo de pontuação
-├── DadosPPGI/                 # Dados de entrada
-│   ├── config.json            # Configurações
-│   ├── input/                 # Listas e classificações
-│   │   ├── ppgi2024.list      # Lista de docentes
-│   │   ├── qualis-journals.csv
-│   │   └── qualis-conferences.csv
-│   └── download/              # XMLs dos currículos
-└── PontuacaoPPGI/             # Módulos de cálculo
-```
-
-#### Como executar:
+Depois, execute os comandos a partir de `PPGI/`:
 
 ```bash
-cd PPGI
 python main-part1.py DadosPPGI/config.json
-python main-part2.py DadosPPGI/config-pontuacao.json
+python main-part2.py DadosPPGI/config.json
+
+# Opcional: métricas externas e ranking
+python main-metricas.py DadosPPGI/config-metricas.json
 ```
 
----
+Consulte [PPGI/README.md](PPGI/README.md) para as entradas, as saídas, os
+arquivos de revisão e os códigos de saída.
 
-## 💻 Como Usar
+## Classificação Qualis
 
-### 1. Obter currículos Lattes em XML
+Periódicos usam a projeção em `Classificador/qualis-unificado.csv`. Eventos
+usam as bases canônicas do QualisLens para os quadriênios 2017–2020 e
+2021–2024.
 
-Os currículos devem ser exportados da Plataforma Lattes em formato XML. Salve-os em um diretório específico (ex: `Curriculos/`).
+O matching de eventos é conservador. Ele aceita correspondência exata ou fuzzy
+somente quando os sinais textuais e estruturais são suficientes. Casos ambíguos
+não recebem estrato automático. Eles entram em revisão manual.
 
-### 2. Configurar os parâmetros
-
-Edite o arquivo `config.json` da aplicação desejada (PIIC ou PPGI) com:
-- Período de avaliação (ano inicial e final)
-- Caminhos para arquivos de entrada
-- Regras de pontuação
-
-### 3. Executar a aplicação
+Atualize as bases oficiais com:
 
 ```bash
-# Para PIIC
-python PIIC/main.py PIIC/DadosPIIC/config.json
-
-# Para PPGI
-python PPGI/main-part1.py PPGI/DadosPPGI/config.json
+python QualisLens/scripts/atualizar_sucupira.py \
+  --area COMPUTAÇÃO \
+  --quadrienio 2021-2024
 ```
 
-## 📦 Dependências
+O comando valida os arquivos antes de publicar as bases. Veja
+[QualisLens/README.md](QualisLens/README.md) para o fluxo offline e os detalhes
+da atualização.
 
-- **pandas**: Manipulação de dados tabulares
-- **tqdm**: Barras de progresso
-- **networkx**: Análise de grafos (usado em algumas análises)
-- **Levenshtein**: Cálculo de similaridade de strings
+## Métricas externas
 
-Instale todas as dependências com:
-```bash
-pip install -r requirements.txt
-```
+O ranking usa citações do Google Scholar. Crossref auxilia a identificação por
+DOI. Scopus pode fornecer indexação, citações e métricas de veículo como
+contexto quando as credenciais estão disponíveis.
 
----
+As métricas usam snapshots imutáveis e um cache SQLite. Elas não mudam os
+relatórios de pontuação. Veja [Metricas/README.md](Metricas/README.md).
 
-## 📄 Licença
+## Licença
 
 GNU General Public License v3.0.
-
----
-
-## 🔍 Observações Importantes
-
-- **Formato dos currículos**: Os currículos devem estar no formato XML exportado diretamente da Plataforma Lattes
-- **Atualizações Qualis**: O sistema Qualis é atualizado periodicamente pela CAPES. Atualize os arquivos CSV conforme necessário
-- **Validação de dados**: Sempre valide os resultados gerados, especialmente em casos de mudanças nas regras de avaliação
-
----
