@@ -380,7 +380,7 @@ def _resultado(
         "qualis_score_margem": margem,
         "qualis_score_llm": None,
         "qualis_status": status,
-        "qualis_requer_revisao": requer_revisao,
+        "qualis_requer_revisao": False,
         "qualis_candidatos": _candidatos_para_json(candidatos),
         "qualis_llm_motivo": None,
         "qualis_obs": "; ".join(observacoes or []) or None,

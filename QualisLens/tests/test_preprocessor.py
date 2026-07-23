@@ -22,9 +22,12 @@ class TestNormalizar:
         assert normalizar("SBRC") == "sbrc"
 
     def test_remove_acentos(self):
-        assert normalizar("Simpósio") == "simposio"
         assert normalizar("Ciência") == "ciencia"
         assert normalizar("Inteligência") == "inteligencia"
+
+    def test_traduz_tipo_de_evento(self):
+        assert normalizar("Simpósio") == "symposium"
+        assert normalizar("Simpósio") == normalizar("Symposium")
 
     def test_remove_stopword_on(self):
         result = normalizar("International Conference on Software Engineering")
@@ -63,7 +66,7 @@ class TestNormalizar:
 
     def test_nome_com_acentos_portugues(self):
         result = normalizar("Simpósio Brasileiro de Redes")
-        assert result == "simposio brasileiro de redes"
+        assert result == "symposium brasileiro de redes"
 
     def test_separadores_viram_espaco(self):
         result = normalizar("IEEE/ACM International Conference")
@@ -209,7 +212,7 @@ class TestPreprocessarLinha:
 
     def test_nome_norm_sem_acentos(self):
         result = preprocessar_linha("Simpósio Brasileiro de Redes")
-        assert "simposio" in result["nome_norm"]
+        assert "symposium" in result["nome_norm"]
         assert "ó" not in result["nome_norm"]
 
     def test_sigla_norm_lowercase(self):

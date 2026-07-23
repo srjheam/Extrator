@@ -63,15 +63,45 @@ def preflight_pontuacao(ocorrencias_path, overrides_path, nota_info, dir_out, an
     review_path=os.path.join(dir_out, f'{ano}_deduplicacao_revisao.csv')
     review_rows=pd.read_csv(review_path, dtype=str, keep_default_na=False).to_dict('records') if os.path.isfile(review_path) else []
     # Part 2 must not calculate identity. The queue published by Part 1 is authoritative.
-    revisoes_deduplicacao=tuple(review_rows)
+    anos_por_ocorrencia = {
+        linha.get('ocorrencia_id', ''): int(linha['ano'])
+        for linha in linhas
+        if linha.get('ocorrencia_id') and str(linha.get('ano', '')).strip()
+    }
+
+    def revisao_deduplicacao_afeta_nota(revisao):
+        ids = tuple(
+            ocorrencia_id
+            for ocorrencia_id in (
+                revisao.get('ocorrencia_a', ''),
+                revisao.get('ocorrencia_b', ''),
+            )
+            if ocorrencia_id
+        )
+        anos = tuple(
+            anos_por_ocorrencia[ocorrencia_id]
+            for ocorrencia_id in ids
+            if ocorrencia_id in anos_por_ocorrencia
+        )
+        # Fail closed if a review does not map to the audited occurrence file.
+        return not anos or any(nota_info.prod_valida_para_nota(item) for item in anos)
+
+    revisoes_deduplicacao=tuple(
+        revisao for revisao in review_rows
+        if revisao_deduplicacao_afeta_nota(revisao)
+    )
     revisoes_qualis = tuple(
         linha for linha in linhas
         if linha.get('tipo') == 'Conferência'
         and str(linha.get('qualis_requer_revisao', '')).strip().lower() == 'true'
-        and nota_info.prod_valida_para_nota(linha['ano'])
+        and nota_info.prod_valida_para_nota(int(linha['ano']))
     )
     ids_deduplicacao = tuple(sorted({x for r in revisoes_deduplicacao for x in (r.get('ocorrencia_a',''),r.get('ocorrencia_b','')) if x}))
-    ids_qualis = tuple(sorted(linha.get('ocorrencia_id','') for linha in revisoes_qualis))
+    ids_qualis = tuple(sorted(
+        linha.get('ocorrencia_id', '')
+        for linha in revisoes_qualis
+        if linha.get('ocorrencia_id')
+    ))
     caminho_revisao_deduplicacao = os.path.join(dir_out, f'{ano}_deduplicacao_revisao.csv')
     caminho_revisao_qualis = os.path.join(dir_out, f'{ano}_qualis_revisao.csv')
     mensagens = []

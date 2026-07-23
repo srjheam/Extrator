@@ -1,7 +1,7 @@
 """Testes unitários para QualisDB (qualis_db.py)."""
 
 import pytest
-from QualisLens.qualislens.qualis_db import QualisDB, _resolver_quadrienio
+from QualisLens.qualislens.qualis_db import QualisDB, _carregar_csv, _resolver_quadrienio
 from QualisLens.qualislens.constants import QUADRIENIO_ANTIGO, QUADRIENIO_RECENTE
 
 
@@ -89,6 +89,22 @@ class TestQualisDBCarga:
 
     def test_volume_minimo_de_registros(self, db):
         assert len(db.df) > 100
+
+    def test_carrega_tsv_legado_com_virgula_no_nome(self, tmp_path):
+        arquivo = tmp_path / "qualis-legado.tsv"
+        arquivo.write_text(
+            "SIGLA\tEvento, com vírgula\tA1\n",
+            encoding="utf-8",
+        )
+
+        resultado = _carregar_csv(arquivo, QUADRIENIO_ANTIGO)
+
+        assert resultado.iloc[0].to_dict() == {
+            "sigla": "SIGLA",
+            "nome": "Evento, com vírgula",
+            "estrato": "A1",
+            "quadrienio": QUADRIENIO_ANTIGO,
+        }
 
 
 class TestQualisDBBuscar:

@@ -94,11 +94,13 @@ def _carregar_csv(path: str, quadrienio: str) -> pd.DataFrame:
 
     # As bases novas usam CSV com cabeçalho. O classificador antigo do projeto
     # usa TSV sem cabeçalho; ele contém a mesma estrutura do período 2017-2020
-    # e continua aceito para não quebrar configurações existentes.
-    df = pd.read_csv(arquivo, encoding="utf-8-sig")
-    colunas_esperadas = {"Sigla", "Nome do evento", "Estrato"}
-    if not colunas_esperadas.issubset(df.columns):
-        df = pd.read_csv(
+    # e continua aceito para não quebrar configurações existentes. Detecte o
+    # TSV antes do parser CSV: nomes de eventos podem conter vírgulas.
+    with arquivo.open(encoding="utf-8-sig") as stream:
+        primeira_linha = stream.readline()
+
+    def carregar_tsv_legado():
+        return pd.read_csv(
             arquivo,
             sep="\t",
             header=None,
@@ -106,6 +108,15 @@ def _carregar_csv(path: str, quadrienio: str) -> pd.DataFrame:
             usecols=[0, 1, 2],
             encoding="utf-8-sig",
         )
+
+    if "\t" in primeira_linha:
+        df = carregar_tsv_legado()
+    else:
+        df = pd.read_csv(arquivo, encoding="utf-8-sig")
+
+    colunas_esperadas = {"Sigla", "Nome do evento", "Estrato"}
+    if not colunas_esperadas.issubset(df.columns):
+        df = carregar_tsv_legado()
 
     ausentes = colunas_esperadas - set(df.columns)
     if ausentes:
