@@ -1,8 +1,10 @@
 """Testes unitários para o módulo de pré-processamento (preprocessor.py)."""
 
 import pytest
-from preprocessor import (
+from QualisLens.qualislens.preprocessor import (
     extrair_acronimo,
+    extrair_siglas_candidatas,
+    extrair_siglas_fortes,
     normalizar,
     preprocessar_linha,
     separar_sigla_nome,
@@ -114,9 +116,9 @@ class TestSepararSiglaNome:
         sigla, nome = separar_sigla_nome("ABCDEFGH - Anything")
         assert sigla == "ABCDEFGH"
 
-    def test_sigla_nove_chars_nao_captura(self):
+    def test_sigla_nove_chars_captura(self):
         sigla, nome = separar_sigla_nome("ABCDEFGHI - Anything")
-        assert sigla is None
+        assert sigla == "ABCDEFGHI"
 
     def test_sigla_com_digitos(self):
         sigla, nome = separar_sigla_nome("IEEE3 - Conference")
