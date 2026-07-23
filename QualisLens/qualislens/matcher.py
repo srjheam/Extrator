@@ -24,6 +24,8 @@ from .constants import (
 )
 from .preprocessor import extrair_acronimo, normalizar, preprocessar_linha
 from .qualis_db import QualisDB, get_db
+from .constants import POLITICA_VERSAO, STATUS_MANUAL_MISS
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +255,8 @@ def _busca_fuzzy(
                 "nome": row["nome"],
                 "estrato": row["estrato"],
                 "quadrienio": row["quadrienio"],
+                "qualis_evento_id": row["qualis_evento_id"],
+                "qualis_registro_id": row["qualis_registro_id"],
                 "score": score,
             }
         )
@@ -280,7 +284,14 @@ def _buscar_exato(pre: dict, db: QualisDB, ano: int) -> tuple[Optional[dict], Op
 
     por_sigla: list[dict] = []
     identidades: set[tuple[str, str, str]] = set()
-    for sigla in pre.get("siglas_fortes", []):
+    # Mixed-case tokens (for example WebMedia) become strong only here: the
+    # official base must corroborate them.  This keeps ordinary title-case
+    # words out of exact matching.
+    siglas_verificar = list(pre.get("siglas_fortes", []))
+    for sigla in pre.get("siglas_candidatas", []):
+        if sigla not in siglas_verificar and any(char.islower() for char in sigla):
+            siglas_verificar.append(sigla)
+    for sigla in siglas_verificar:
         resultado = db.buscar_por_sigla_e_nome(sigla, None, ano)
         if resultado and _identidade(resultado) not in identidades:
             identidades.add(_identidade(resultado))
@@ -304,8 +315,41 @@ def _buscar_exato(pre: dict, db: QualisDB, ano: int) -> tuple[Optional[dict], Op
     if por_sigla and por_nome and _identidade(por_sigla[0]) != _identidade(por_nome):
         return None, "conflito_sigla_nome"
     if por_sigla:
+        # A supplied name is evidence.  An acronym must not override a
+        # different workshop/conference or a topical name conflict.
+        nome_informado = pre.get("nome_norm", "")
+        if nome_informado and len(nome_informado.split()) > 1:
+            candidato = normalizar(por_sigla[0]["nome"])
+            tipos = _tipo_evento(nome_informado), _tipo_evento(candidato)
+            score = _score_hibrido(nome_informado, candidato, "", "")
+            if (tipos[0] and tipos[1] and not (tipos[0] & tipos[1])) or score < 80:
+                return None, "conflito_sigla_nome"
         return por_sigla[0], None
     return por_nome, None
+
+
+def qualis_input_id(nome: str, ano: int, sigla: Optional[str] = None) -> str:
+    """Identity of reported input. It never uses XML or publication sequence."""
+    payload = "\x1f".join((POLITICA_VERSAO, str(ano), normalizar(nome), normalizar(sigla or "")))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+
+def validar_resultado(resultado: dict) -> dict:
+    """Apply output invariants at one boundary."""
+    status = resultado.get("qualis_status")
+    accepted = {STATUS_EXATO, STATUS_AUTO_FUZZY, "LLM_OK", "LLM_DUPLO_OK", "MANUAL_OK"}
+    selected = bool(resultado.get("qualis_registro_id") and resultado.get("qualis_estrato"))
+    if status == "ERRO":
+        resultado["qualis_requer_revisao"] = True
+    elif status == STATUS_MANUAL_MISS:
+        resultado["qualis_requer_revisao"] = False
+    elif status in accepted and not selected:
+        resultado["qualis_status"] = STATUS_REVISAO_MANUAL
+        resultado["qualis_requer_revisao"] = True
+        resultado["qualis_obs"] = ((resultado.get("qualis_obs") or "") + "; resultado_aceito_sem_registro").strip("; ")
+    else:
+        resultado["qualis_requer_revisao"] = status in {STATUS_REVISAO_MANUAL, "LLM_MISS", "LLM_LOW_OK", "LLM_LOW_MISS", "LLM_DUPLO_DIVERGE", "ERRO"}
+    return resultado
 
 
 def _resultado(
@@ -317,13 +361,17 @@ def _resultado(
     sigla: Optional[str] = None,
     nome: Optional[str] = None,
     quadrienio: Optional[str] = None,
+    evento_id: Optional[str] = None,
+    registro_id: Optional[str] = None,
     score: float = 0.0,
     margem: float = 0.0,
     observacoes: Optional[list[str]] = None,
     precisa_llm: bool = False,
 ) -> dict:
-    requer_revisao = status == STATUS_REVISAO_MANUAL
-    return {
+    result = {
+        "qualis_input_id": qualis_input_id(pre.get("venue_informado", pre.get("nome_original", "")), pre.get("ano", 0), pre.get("sigla_original")),
+        "qualis_evento_id": evento_id,
+        "qualis_registro_id": registro_id,
         "qualis_estrato": estrato,
         "qualis_sigla": sigla,
         "qualis_nome_oficial": nome,
@@ -336,10 +384,16 @@ def _resultado(
         "qualis_candidatos": _candidatos_para_json(candidatos),
         "qualis_llm_motivo": None,
         "qualis_obs": "; ".join(observacoes or []) or None,
+        "qualis_origem_decisao": "automatico",
+        "qualis_politica_versao": POLITICA_VERSAO,
+        "qualis_justificativa": None,
+        "qualis_decidido_por": None,
+        "qualis_decidido_em": None,
         "_pre": pre,
         "_candidatos_lista": candidatos,
         "_precisa_llm": precisa_llm,
     }
+    return validar_resultado(result)
 
 
 def match(
@@ -391,6 +445,7 @@ def match(
 
     # 1. Pré-processamento
     pre = preprocessar_linha(nome_conferencia, sigla_conferencia)
+    pre["ano"] = ano
     nome_norm = pre["nome_norm"]
     siglas_norm = {
         normalizar(sigla)
@@ -454,14 +509,19 @@ def match(
             exato["estrato"],
             exato["quadrienio"],
         )
+        is_alt = bool(exato.get("extrapolado"))
+        if is_alt:
+            obs_parts.append("periodo_incompativel_requer_override")
         return _resultado(
-            status=STATUS_EXATO,
+            status=STATUS_REVISAO_MANUAL if is_alt else STATUS_EXATO,
             candidatos=candidatos,
             pre=pre,
             estrato=exato["estrato"],
             sigla=exato["sigla"],
             nome=exato["nome"],
             quadrienio=exato["quadrienio"],
+            evento_id=exato.get("qualis_evento_id"),
+            registro_id=exato.get("qualis_registro_id"),
             score=100.0,
             margem=margem,
             observacoes=obs_parts,
@@ -491,6 +551,8 @@ def match(
             sigla=melhor["sigla"],
             nome=melhor["nome"],
             quadrienio=melhor["quadrienio"],
+            evento_id=melhor.get("qualis_evento_id"),
+            registro_id=melhor.get("qualis_registro_id"),
             score=score_top,
             margem=margem,
             observacoes=obs_parts,

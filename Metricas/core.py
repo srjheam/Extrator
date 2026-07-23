@@ -6,14 +6,15 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from Deduplicacao.core import doi_valido, normalizar, normalizar_doi
+from .errors import ProviderFailure
 
 POLITICA_METRICAS_V1 = {
-    "versao": "1",
-    "descricao": "Scholar usa título, ano e evidência de autor ou veículo; OpenAlex é fallback.",
+    "versao": "2",
+    "descricao": "Google Scholar é a única fonte de ranking; Scopus é contexto; Crossref é somente identidade.",
 }
-SCHEMA_VERSAO = "1"
+SCHEMA_VERSAO = "2"
 
-ESTADOS_FINAIS = {"RESOLVIDO", "NAO_ENCONTRADO", "AMBIGUO", "DOI_INCOMPATIVEL", "REVISAO_DEDUPLICACAO", "CREDENCIAL_AUSENTE"}
+ESTADOS_FINAIS = {"RESOLVIDO", "NAO_ENCONTRADO", "AMBIGUO", "IDENTIDADE_INCOMPATIVEL", "CREDENCIAL_AUSENTE", "LIMITE_EXCEDIDO", "ERRO_TEMPORARIO", "ERRO_PERMANENTE", "CACHE_AUSENTE", "CACHE_EXPIRADO"}
 
 
 def agora():
@@ -37,22 +38,29 @@ def _autores(valor):
 
 
 def _sobrenomes(autores):
-    return {normalizar(x).split()[-1] for x in autores if normalizar(x).split()}
+    """Accept both `SILVA, J. R.` and `J R Silva` citation forms."""
+    nomes = set()
+    for autor in autores:
+        partes = normalizar(autor).split()
+        if partes:
+            nomes.add(partes[0] if ',' in str(autor) else partes[-1])
+    return nomes
 
 
 def _compativel(local, externo):
     """Não aceita DOI quando os metadados disponíveis entram em conflito."""
     doi_local = normalizar_doi(local.get("doi"))
-    if doi_valido(doi_local) and doi_local != normalizar_doi(externo.get("doi")):
+    doi_externo = normalizar_doi(externo.get("doi"))
+    if doi_valido(doi_local) and doi_local != doi_externo:
         return False, "DOI incompatível"
     if normalizar(local.get("titulo")) != normalizar(externo.get("title")):
         return False, "título incompatível"
     ano_local, ano_externo = str(local.get("ano") or ""), str(externo.get("year") or "")
     if ano_local and ano_externo and ano_local != ano_externo:
         return False, "ano incompatível"
-    tipo = normalizar(local.get("tipo"))
-    externo_tipo = normalizar(externo.get("type"))
-    if tipo and externo_tipo and (("period" in tipo and externo_tipo not in {"journal article", "article"}) or ("confer" in tipo and "proceedings" not in externo_tipo)):
+    tipo = normalizar(local.get("tipo")); externo_tipo = normalizar(externo.get("type"))
+    fonte_tipo = normalizar(externo.get("source_type"))
+    if tipo and externo_tipo and ("period" in tipo and externo_tipo not in {"journal article", "article"}):
         return False, "tipo incompatível"
     issn_local = normalizar(local.get("issn"))
     issns = {normalizar(x) for x in externo.get("issn", [])}
@@ -60,7 +68,8 @@ def _compativel(local, externo):
         return False, "ISSN incompatível"
     autores_locais = _autores(local.get("autores"))
     autores_externos = _autores(externo.get("authors"))
-    if autores_locais and autores_externos and not (_sobrenomes(autores_locais) & _sobrenomes(autores_externos)):
+    # An exact DOI is decisive. Initial-only author strings are soft evidence.
+    if not doi_valido(doi_local) and autores_locais and autores_externos and not (_sobrenomes(autores_locais) & _sobrenomes(autores_externos)):
         return False, "autores incompatíveis"
     return True, ""
 
@@ -87,73 +96,78 @@ def enriquecer_publicacoes(
 ):
     if snapshot_id and repositorio.existe_snapshot(snapshot_id):
         raise ValueError("snapshots são imutáveis")
-    snapshot_id = repositorio.criar_snapshot(politica["versao"], modo, snapshot_id)
+    publicacoes_canonicas = list(publicacoes_canonicas)
+    for p in publicacoes_canonicas: p.setdefault("impressao_canonica", fingerprint(p))
+    plano = {"primarios": [x.nome for x in provedores], "independentes": [x.nome for x in provedores_independentes], "estrategia": estrategia_provedores}
+    snapshot_id = repositorio.criar_snapshot(politica["versao"], modo, snapshot_id, publicacoes_canonicas, plano=plano)
     resultado = ResultadoEnriquecimento(snapshot_id)
     bloqueados = set(revisao_deduplicacao)
-    for publicacao in publicacoes_canonicas:
-        canonica_id = publicacao["publicacao_canonica_id"]
-        fp = fingerprint(publicacao)
-        if canonica_id in bloqueados:
-            identidade = _identidade(publicacao, snapshot_id, "deduplicacao", "", "REVISAO_DEDUPLICACAO", fp)
-            repositorio.salvar_identidade(identidade); resultado.identidades.append(identidade); continue
-        for provedor in provedores_independentes:
-            identidade, metricas, revisao = _executar_provedor(publicacao, provedor, repositorio, snapshot_id, modo, fp, refresh)
-            identidade["papel_provedor"] = "AUXILIAR"
-            identidade["fallback_acionado_por"] = ""
-            for metrica in metricas:
-                metrica["papel_provedor"] = "AUXILIAR"
-                metrica["fallback_acionado_por"] = ""
-            repositorio.salvar_identidade(identidade)
-            repositorio.salvar_metricas(metricas)
-            if revisao: repositorio.salvar_revisao(revisao); resultado.revisoes.append(revisao)
-            resultado.identidades.append(identidade); resultado.metricas.extend(metricas)
-        motivo_fallback = ""
-        for indice, provedor in enumerate(provedores):
-            identidade, metricas, revisao = _executar_provedor(publicacao, provedor, repositorio, snapshot_id, modo, fp, refresh)
-            identidade["papel_provedor"] = "PRIMARIO" if indice == 0 else "FALLBACK"
-            identidade["fallback_acionado_por"] = motivo_fallback
-            for metrica in metricas:
-                metrica["papel_provedor"] = identidade["papel_provedor"]
-                metrica["fallback_acionado_por"] = motivo_fallback
-            repositorio.salvar_identidade(identidade)
-            repositorio.salvar_metricas(metricas)
-            if revisao: repositorio.salvar_revisao(revisao); resultado.revisoes.append(revisao)
-            resultado.identidades.append(identidade); resultado.metricas.extend(metricas)
-            if estrategia_provedores == "fallback":
-                if identidade["status"] == "RESOLVIDO" and any(x.get("valor") is not None for x in metricas):
-                    break
-                status_fallback = identidade["status"] if identidade["status"] != "RESOLVIDO" else "SEM_METRICA"
-                motivo_fallback = provedor.nome + ":" + status_fallback
-    repositorio.finalizar_snapshot(snapshot_id)
-    return resultado
-
-
-def _executar_provedor(publicacao, provedor, repositorio, snapshot_id, modo, fp, refresh):
+    teve_bloqueio = False
     try:
-        return _enriquecer_um(publicacao, provedor, repositorio, snapshot_id, modo, fp, refresh)
+        for publicacao in publicacoes_canonicas:
+            canonica_id = publicacao["publicacao_canonica_id"]
+            fp = fingerprint(publicacao)
+            if canonica_id in bloqueados:
+                identidade = _identidade(publicacao, snapshot_id, "deduplicacao", "", "AMBIGUO", fp, {"motivo": "revisão de deduplicação pendente"})
+                repositorio.salvar_identidade(identidade); resultado.identidades.append(identidade); continue
+            for provedor in provedores_independentes:
+                identidade, metricas, revisao = _executar_provedor(publicacao, provedor, repositorio, snapshot_id, modo, fp, refresh, politica)
+                identidade["papel_provedor"] = "AUXILIAR"
+                identidade["fallback_acionado_por"] = ""
+                for metrica in metricas:
+                    metrica["papel_provedor"] = "AUXILIAR"
+                    metrica["fallback_acionado_por"] = ""
+                repositorio.salvar_identidade(identidade)
+                repositorio.salvar_metricas(metricas)
+                if revisao: repositorio.salvar_revisao(revisao); resultado.revisoes.append(revisao)
+                resultado.identidades.append(identidade); resultado.metricas.extend(metricas)
+            motivo_fallback = ""
+            for indice, provedor in enumerate(provedores):
+                identidade, metricas, revisao = _executar_provedor(publicacao, provedor, repositorio, snapshot_id, modo, fp, refresh, politica)
+                identidade["papel_provedor"] = "PRIMARIO" if indice == 0 else "FALLBACK"
+                identidade["fallback_acionado_por"] = motivo_fallback
+                for metrica in metricas:
+                    metrica["papel_provedor"] = identidade["papel_provedor"]
+                    metrica["fallback_acionado_por"] = motivo_fallback
+                repositorio.salvar_identidade(identidade)
+                repositorio.salvar_metricas(metricas)
+                if revisao: repositorio.salvar_revisao(revisao); resultado.revisoes.append(revisao)
+                resultado.identidades.append(identidade); resultado.metricas.extend(metricas)
+                if identidade["status"] != "RESOLVIDO": teve_bloqueio = True
+                if estrategia_provedores == "fallback":
+                    if identidade["status"] == "RESOLVIDO" and any(x.get("valor") is not None for x in metricas):
+                        break
+                    status_fallback = identidade["status"] if identidade["status"] != "RESOLVIDO" else "SEM_METRICA"
+                    motivo_fallback = provedor.nome + ":" + status_fallback
+        repositorio.finalizar_snapshot(snapshot_id, "PARCIAL" if teve_bloqueio else "CONCLUIDO")
+        return resultado
     except Exception as erro:
-        evidencias = {"erro_tipo": type(erro).__name__}
-        try:
-            doi = normalizar_doi(publicacao.get("doi"))
-            tipo, chave = provedor.chave_consulta(publicacao, doi)
-            repositorio.registrar_consulta(snapshot_id, publicacao["publicacao_canonica_id"], provedor.nome, tipo, chave, False, {"status": "ERRO_TEMPORARIO", **evidencias})
-        except Exception:
-            pass
-        return _identidade(publicacao, snapshot_id, provedor.nome, "", "ERRO_TEMPORARIO", fp, evidencias), [], None
+        repositorio.finalizar_snapshot(snapshot_id, "FALHOU", erro)
+        raise
+
+
+def _executar_provedor(publicacao, provedor, repositorio, snapshot_id, modo, fp, refresh, politica):
+    try:
+        return _enriquecer_um(publicacao, provedor, repositorio, snapshot_id, modo, fp, refresh, politica)
+    except ProviderFailure as erro:
+        resposta={"status": erro.status, "evidencias": {"erro": str(erro)}}
+        return _identidade(publicacao, snapshot_id, provedor.nome, "", erro.status, fp, resposta["evidencias"]), [], None
 
 
 def _identidade(p, snapshot_id, provedor, externo, status, fp, evidencias=None, conflitos=None):
     return {"schema_versao": SCHEMA_VERSAO, "snapshot_id": snapshot_id, "publicacao_canonica_id": p["publicacao_canonica_id"], "impressao_canonica": fp, "provedor": provedor, "identificador_externo": externo, "doi_consultado": normalizar_doi(p.get("doi")), "status": status, "evidencias_json": json.dumps(evidencias or {}, ensure_ascii=False), "conflitos_json": json.dumps(conflitos or {}, ensure_ascii=False), "politica_versao": POLITICA_METRICAS_V1["versao"], "resolvido_em": agora()}
 
 
-def _enriquecer_um(p, provedor, repo, snapshot_id, modo, fp, refresh):
+def _enriquecer_um(p, provedor, repo, snapshot_id, modo, fp, refresh, politica=POLITICA_METRICAS_V1):
     doi = normalizar_doi(p.get("doi"))
     if hasattr(provedor, "chave_consulta"):
         tipo_consulta, chave_consulta = provedor.chave_consulta(p, doi)
     else:
         tipo_consulta, chave_consulta = ("doi", doi) if doi_valido(doi) else ("bibliografica", fp)
-    resposta = None if refresh else repo.obter_consulta(provedor.nome, tipo_consulta, chave_consulta)
+    resposta = None if refresh else repo.obter_consulta(provedor.nome, tipo_consulta, chave_consulta, provedor.endpoint_versao, permitir_expirada=modo == "offline", politica_versao=politica["versao"])
     cache_hit = resposta is not None
+    if resposta and resposta.get("_cache", {}).get("expirado"):
+        resposta["status"] = "CACHE_EXPIRADO" if modo == "offline" else resposta["status"]
     if not resposta:
         if modo == "offline":
             resposta = {"status": "CACHE_AUSENTE"}
@@ -165,8 +179,12 @@ def _enriquecer_um(p, provedor, repo, snapshot_id, modo, fp, refresh):
             resposta = provedor.resolver_por_doi(p, doi)
         else:
             resposta = {"status": "AMBIGUO", "evidencias": {"motivo": "provedor requer DOI"}}
+        # This is the acquisition timestamp. It is deliberately retained on
+        # later cache hits and is not the timestamp of this snapshot.
+        resposta.setdefault("_cache", {"consultada_em": agora(), "expira_em": ""})
         if resposta.get("status") not in {"ERRO_TEMPORARIO", "LIMITE_EXCEDIDO", "CREDENCIAL_AUSENTE", "ERRO_PERMANENTE"}:
-            repo.salvar_consulta(provedor.nome, tipo_consulta, chave_consulta, resposta)
+            ttl = 86400 if resposta.get("status") in {"NAO_ENCONTRADO", "AMBIGUO"} else 604800
+            repo.salvar_consulta(provedor.nome, tipo_consulta, chave_consulta, resposta, provedor.endpoint_versao, politica_versao=politica["versao"], ttl_seconds=ttl)
     repo.registrar_consulta(snapshot_id, p["publicacao_canonica_id"], provedor.nome, tipo_consulta, chave_consulta, cache_hit, resposta)
     if resposta["status"] != "RESOLVIDO":
         identidade = _identidade(p, snapshot_id, provedor.nome, "", resposta["status"], fp, resposta.get("evidencias"))
@@ -177,14 +195,15 @@ def _enriquecer_um(p, provedor, repo, snapshot_id, modo, fp, refresh):
     ok, motivo = validador(p, externo) if validador else _compativel(p, externo)
     if not ok:
         conflito = {"status": "DOI_INCOMPATIVEL", "evidencias": resposta.get("evidencias", {}), "conflitos": {"motivo": motivo}, "identidade": externo}
-        return _identidade(p, snapshot_id, provedor.nome, externo.get("id", ""), "DOI_INCOMPATIVEL", fp, resposta.get("evidencias"), {"motivo": motivo}), [], _revisao(p, provedor.nome, snapshot_id, fp, conflito)
+        return _identidade(p, snapshot_id, provedor.nome, externo.get("id", ""), "IDENTIDADE_INCOMPATIVEL", fp, resposta.get("evidencias"), {"motivo": motivo}), [], _revisao(p, provedor.nome, snapshot_id, fp, conflito)
     evidencias = {"identidade": externo, "consulta": resposta.get("evidencias", {})}
     identidade = _identidade(p, snapshot_id, provedor.nome, externo.get("id", ""), "RESOLVIDO", fp, evidencias)
     metricas = []
     for metrica in resposta.get("metricas", []):
         if metrica.get("valor") is None:
             continue
-        metricas.append({"schema_versao": SCHEMA_VERSAO, "snapshot_id": snapshot_id, "publicacao_canonica_id": p["publicacao_canonica_id"], "provedor": provedor.nome, "identificador_externo": externo.get("id", ""), "obtida_em": agora(), "endpoint_versao": provedor.endpoint_versao, "status": "RESOLVIDO", **metrica})
+        cache = resposta.get("_cache", {})
+        metricas.append({"schema_versao": SCHEMA_VERSAO, "snapshot_id": snapshot_id, "publicacao_canonica_id": p["publicacao_canonica_id"], "provedor": provedor.nome, "identificador_externo": externo.get("id", ""), "consultada_em": cache.get("consultada_em", agora()), "obtida_em": cache.get("consultada_em", agora()), "registrada_em": agora(), "cache_hit": cache_hit, "cache_age_seconds": cache.get("age_seconds", 0), "cache_expira_em": cache.get("expira_em", ""), "endpoint_versao": provedor.endpoint_versao, "status": "RESOLVIDO", **metrica})
     return identidade, metricas, None
 
 

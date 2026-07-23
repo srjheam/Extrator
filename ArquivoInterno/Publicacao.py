@@ -22,6 +22,7 @@ class ProvenienciaPublicacao:
     arquivo_xml: str = ""
     sequencia: int = 0
     elemento_xml: str = ""
+    incompleta: bool = False
 
 
 @dataclass(frozen=True)

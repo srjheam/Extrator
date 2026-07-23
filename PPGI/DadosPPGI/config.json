@@ -12,5 +12,6 @@
     "arquivo_qualis_conference": "../Classificador/qualis_conferencias.csv",
     "arquivo_publicacoes_ocorrencias": "DadosPPGI/saida/2024_publicacoes_ocorrencias.csv",
     "arquivo_overrides_deduplicacao": "DadosPPGI/input/publicacoes_deduplicacao_overrides.csv",
+    "arquivo_overrides_qualis": "DadosPPGI/input/qualis_overrides.csv",
     "config_pontuacao": "DadosPPGI/config-pontuacao.json"
 }

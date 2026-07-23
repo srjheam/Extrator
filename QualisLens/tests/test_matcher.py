@@ -133,6 +133,19 @@ class TestMatch:
         assert result["qualis_status"] == STATUS_EXATO
         assert result["qualis_estrato"] == "A1"
 
+    def test_acronimo_isolado_conhecido_resolve(self, db):
+        result = match("ICSE 2023", 2023, None, db)
+        assert result["qualis_status"] == STATUS_EXATO
+        assert result["qualis_sigla"] == "ICSE"
+
+    def test_workshop_nao_casa_com_data_por_sigla_extraida(self, db):
+        result = match("Data-Driven Workshop on X", 2023, None, db)
+        assert not (result["qualis_status"] == STATUS_EXATO and result["qualis_sigla"] == "DATA")
+
+    def test_parentetico_topico_nao_substitui_nome_por_ai_canadense(self, db):
+        result = match("International Conference on Artificial Intelligence (AI) Applications", 2023, None, db)
+        assert not (result["qualis_status"] == STATUS_EXATO and result["qualis_sigla"] == "AI")
+
     def test_exato_por_sigla_aaai(self, db):
         result = match("AAAI Conference on Artificial Intelligence", 2022, "AAAI", db)
         assert result["qualis_status"] == STATUS_EXATO
@@ -231,8 +244,6 @@ class TestMatch:
     def test_obs_extrapolado_quando_fora_do_periodo(self, db):
         # VLDB está na base 2017-2020; buscar em 2023 deve extrapolá-la
         result = match("VLDB - Very Large Data Bases", 2023, "VLDB", db)
-        if result["qualis_status"] == STATUS_EXATO:
-            # Se encontrou, pode ter sido extrapolada
-            obs = result.get("qualis_obs") or ""
-            # A busca cross-quadriênio gera obs "extrapolado"
-            assert "extrapolado" in obs or result["qualis_quadrienio"] is not None
+        if result["qualis_quadrienio"] == "2017-2020":
+            assert result["qualis_status"] == STATUS_REVISAO_MANUAL
+            assert result["qualis_requer_revisao"] is True

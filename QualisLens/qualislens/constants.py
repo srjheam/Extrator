@@ -55,3 +55,7 @@ STATUSES_REVISAO: list[str] = [
 
 # ── Número de candidatos retornados pelo fuzzy ────────────────────────────────
 TOP_N_CANDIDATOS: int = 5
+
+# Identifica as regras que geraram ``qualis_input_id``.  Altere quando uma
+# mudança de política puder alterar uma decisão humana já registrada.
+POLITICA_VERSAO: str = "2"

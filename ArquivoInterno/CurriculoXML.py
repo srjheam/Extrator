@@ -8,7 +8,11 @@ class CurriculoXML():
         self._root = ET.parse(caminho_xml)
         self._caminho_xml = str(caminho_xml)
         dados = self._root.find("DADOS-GERAIS")
-        self._curriculo_id = (dados.attrib.get("NUMERO-IDENTIFICADOR", "") if dados is not None else "") or Path(caminho_xml).stem
+        # The Lattes identifier belongs to CURRICULO-VITAE.  A filename is not
+        # provenance and must never become an identity.
+        self._curriculo_id = self._root.getroot().attrib.get("NUMERO-IDENTIFICADOR", "") or (dados.attrib.get("NUMERO-IDENTIFICADOR", "") if dados is not None else "")
+        if not self._curriculo_id:
+            raise ValueError("CURRICULO-VITAE sem NUMERO-IDENTIFICADOR")
 
     @staticmethod
     def _atributo(elemento, nome):
@@ -37,7 +41,7 @@ class CurriculoXML():
             pagina_inicial=self._atributo(maisdetalhe, "PAGINA-INICIAL"),
             pagina_final=self._atributo(maisdetalhe, "PAGINA-FINAL"),
             autores_detalhados=autores,
-            proveniencia=ProvenienciaPublicacao(self._curriculo_id, self._caminho_xml, sequencia, elemento),
+            proveniencia=ProvenienciaPublicacao(self._curriculo_id, self._caminho_xml, sequencia, elemento, not bool(sequencia)),
         )
 
     def get_nome(self):
@@ -96,7 +100,7 @@ class CurriculoXML():
     def get_artigo(self, ano_inicio: int, ano_fim: int):
         all_artigos = []
 
-        for sequencia, item in enumerate(self._root.iter("ARTIGO-PUBLICADO"), 1):
+        for item in self._root.iter("ARTIGO-PUBLICADO"):
             detalhe = next(iter(item.iter("DADOS-BASICOS-DO-ARTIGO")), None)
             maisdetalhe = next(iter(item.iter("DETALHAMENTO-DO-ARTIGO")), None)
             if detalhe is None:
@@ -108,7 +112,7 @@ class CurriculoXML():
             issn = self._atributo(maisdetalhe, 'ISSN')
             revista = self._atributo(maisdetalhe, 'TITULO-DO-PERIODICO-OU-REVISTA')
             if ano >= ano_inicio and ano <= ano_fim:
-                metadados = self._metadados(item, detalhe, maisdetalhe, sequencia, "ARTIGO-PUBLICADO")
+                metadados = self._metadados(item, detalhe, maisdetalhe, self._atributo(item, "SEQUENCIA-PRODUCAO"), "ARTIGO-PUBLICADO")
                 autores = [a.nome_citacao or a.nome for a in metadados.autores_detalhados]
                 all_artigos.append(prod.Artigo(ano, pais, issn, prod.NaturezaArtigo.by_tag(natureza), titulo, revista, autores, metadados))
 
@@ -153,7 +157,7 @@ class CurriculoXML():
     def get_trabalho_evento(self, ano_inicio: int, ano_fim: int):
         all_trabalhos = []
 
-        for sequencia, item in enumerate(self._root.iter("TRABALHO-EM-EVENTOS"), 1):
+        for item in self._root.iter("TRABALHO-EM-EVENTOS"):
             detalhe = next(iter(item.iter("DADOS-BASICOS-DO-TRABALHO")), None)
             maisdetalhe = next(iter(item.iter("DETALHAMENTO-DO-TRABALHO")), None)
             if detalhe is None:
@@ -165,7 +169,7 @@ class CurriculoXML():
             classificacao = self._atributo(maisdetalhe, "CLASSIFICACAO-DO-EVENTO") or "NACIONAL"
             venue = self._atributo(maisdetalhe, 'NOME-DO-EVENTO').strip()
             if ano >= ano_inicio and ano <= ano_fim:
-                metadados = self._metadados(item, detalhe, maisdetalhe, sequencia, "TRABALHO-EM-EVENTOS")
+                metadados = self._metadados(item, detalhe, maisdetalhe, self._atributo(item, "SEQUENCIA-PRODUCAO"), "TRABALHO-EM-EVENTOS")
                 autores = [a.nome_citacao or a.nome for a in metadados.autores_detalhados]
                 all_trabalhos.append(prod.TrabalhoEvento(ano, pais, prod.NaturezaTrabalho.by_tag(natureza), prod.ClassificacaoEvento.by_tag(classificacao), titulo, venue, autores, metadados))
             

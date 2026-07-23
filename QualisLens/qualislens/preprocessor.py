@@ -79,6 +79,11 @@ _STOPWORDS: frozenset[str] = frozenset({
     "with", "to", "at", "by", "from", "proceedings", "anais",
 })
 
+# Equivalent Portuguese and English structural terms must compare alike.
+_TIPOS_EVENTO = ((r"\bconferencia\b", "conference"), (r"\bsimposio\b", "symposium"),
+                 (r"\bcongresso\b", "congress"), (r"\bencontro\b", "meeting"),
+                 (r"\boficina\b", "workshop"))
+
 # Stopwords extras para extracão de acrônimo (organizadoras não entram no acrônimo)
 _STOPWORDS_ACR: frozenset[str] = _STOPWORDS | frozenset({"ieee", "acm", "springer", "elsevier"})
 
@@ -169,8 +174,15 @@ def extrair_siglas_fortes(texto: str) -> list[str]:
     trechos: list[str] = []
     prefixo = _RE_SIGLA_NOME.match(texto)
     if prefixo:
-        trechos.append(prefixo.group(1))
-    trechos.extend(re.findall(r"\(([^()]*)\)", texto))
+        # A normal title-case word before '-' is a name, not evidence of acronym.
+        token = prefixo.group(1)
+        if token.upper() == token or any(ch.isdigit() for ch in token):
+            trechos.append(token)
+    # Parentheses are candidates only.  They become strong only for upper-case
+    # acronym-only input; a surrounding conflicting name is checked by matcher.
+    for parenthetical in re.findall(r"\(([^()]*)\)", texto):
+        if parenthetical.strip().upper() == parenthetical.strip():
+            trechos.append(parenthetical)
 
     # Formatos comuns do Lattes: "WebMedia 2010" e ". AINA 2008."
     sufixo = re.search(
@@ -179,7 +191,9 @@ def extrair_siglas_fortes(texto: str) -> list[str]:
         texto,
     )
     if sufixo:
-        trechos.append(sufixo.group(1))
+        token = sufixo.group(1)
+        if token.upper() == token or any(ch.isdigit() for ch in token):
+            trechos.append(token)
 
     resultado: list[str] = []
     vistos: set[str] = set()
@@ -289,6 +303,8 @@ def normalizar(texto: str) -> str:
     # Expandir abreviações antes de remover pontuação
     for padrao, expansao in _ABREVIACOES:
         resultado = re.sub(padrao, expansao, resultado)
+    for padrao, expansao in _TIPOS_EVENTO:
+        resultado = re.sub(padrao, expansao, resultado)
 
     # Remover pontuação (exceto espaços)
     resultado = re.sub(r"[^\w\s]", " ", resultado)
@@ -364,6 +380,7 @@ def preprocessar_linha(
         )
 
     return {
+        "venue_informado": nome_conferencia,
         "sigla_original": sigla_original,
         "siglas_candidatas": siglas_candidatas,
         "siglas_fortes": siglas_fortes,

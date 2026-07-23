@@ -7,6 +7,7 @@ campos e expõe a função `buscar` para resolução de um artigo pelo ano de pu
 
 import logging
 import re
+import hashlib
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +36,12 @@ _COL_ESTRATO = "estrato"
 _COL_SIGLA_NORM = "sigla_norm"
 _COL_NOME_NORM = "nome_norm"
 _COL_QUADRIENIO = "quadrienio"
+
+
+def _id(*parts: object) -> str:
+    """Stable, row-order independent opaque identity."""
+    value = "\x1f".join(str(part).strip() for part in parts)
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
 
 
 def _normalizar_campo(valor: object) -> str:
@@ -186,6 +193,21 @@ class QualisDB:
         # Campos normalizados para busca
         self.df[_COL_SIGLA_NORM] = self.df[_COL_SIGLA].apply(_normalizar_campo)
         self.df[_COL_NOME_NORM] = self.df[_COL_NOME].apply(normalizar)
+        self.df["qualis_evento_id"] = self.df.apply(
+            lambda row: _id("evento", row[_COL_SIGLA_NORM], row[_COL_NOME_NORM]), axis=1
+        )
+        self.df["qualis_registro_id"] = self.df.apply(
+            lambda row: _id("registro", row["qualis_evento_id"], row[_COL_QUADRIENIO], row[_COL_ESTRATO]), axis=1
+        )
+        # A hash collision is distinct from a repeated source record.
+        for col, payload in (("qualis_evento_id", [_COL_SIGLA_NORM, _COL_NOME_NORM]), ("qualis_registro_id", ["qualis_evento_id", _COL_QUADRIENIO, _COL_ESTRATO])):
+            if any(
+                len({tuple(map(str, values)) for values in group[payload].itertuples(index=False, name=None)}) > 1
+                for _, group in self.df.groupby(col)
+            ):
+                raise ValueError(f"Colisão de identidade Qualis em {col}")
+        self.source_paths = {QUADRIENIO_ANTIGO: str(p17), QUADRIENIO_RECENTE: str(p25)}
+        self.source_hashes = {q: hashlib.sha256(Path(path).read_bytes()).hexdigest() for q, path in self.source_paths.items()}
 
         # Acrônimo pré-computado para matching secundário
         self.df["acronimo"] = self.df[_COL_NOME].apply(
@@ -260,14 +282,19 @@ class QualisDB:
             )
 
         row = resultados.iloc[0]
+        return self._row_dict(row, extrapolado, "sigla" if por_sigla else "nome", len(resultados) > 1)
+
+    def _row_dict(self, row, extrapolado: bool, campo_match: str, ambiguo: bool = False) -> dict:
         return {
             "sigla": row[_COL_SIGLA],
             "nome": row[_COL_NOME],
             "estrato": row[_COL_ESTRATO],
-            "quadrienio": quadrienio,
+            "quadrienio": row[_COL_QUADRIENIO],
             "extrapolado": extrapolado,
-            "campo_match": "sigla" if por_sigla else "nome",
-            "ambiguo": len(resultados) > 1,
+            "campo_match": campo_match,
+            "ambiguo": ambiguo,
+            "qualis_evento_id": row["qualis_evento_id"],
+            "qualis_registro_id": row["qualis_registro_id"],
         }
 
     def buscar_por_sigla_e_nome(
@@ -332,15 +359,7 @@ class QualisDB:
                     quadrienio_alternativo,
                     ano,
                 )
-                return {
-                    "sigla": row[_COL_SIGLA],
-                    "nome": row[_COL_NOME],
-                    "estrato": row[_COL_ESTRATO],
-                    "quadrienio": quadrienio_alternativo,
-                    "extrapolado": True,
-                    "campo_match": "sigla" if campo_busca == _COL_SIGLA_NORM else "nome",
-                    "ambiguo": len(resultados) > 1,
-                }
+                return self._row_dict(row, True, "sigla" if campo_busca == _COL_SIGLA_NORM else "nome", len(resultados) > 1)
 
         return None
 
@@ -386,6 +405,13 @@ class QualisDB:
             row[_COL_QUADRIENIO]: row[_COL_ESTRATO]
             for _, row in resultados.iterrows()
         }
+
+    def get_by_event_id(self, qualis_evento_id: str) -> list[dict]:
+        return [self._row_dict(row, False, "id") for _, row in self.df[self.df["qualis_evento_id"] == qualis_evento_id].iterrows()]
+
+    def get_by_record_id(self, qualis_registro_id: str) -> Optional[dict]:
+        rows = self.df[self.df["qualis_registro_id"] == qualis_registro_id]
+        return None if rows.empty else self._row_dict(rows.iloc[0], False, "id")
 
 
 # ── Instância singleton (carregada uma única vez por processo) ────────────────

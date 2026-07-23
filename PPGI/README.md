@@ -80,18 +80,70 @@ python main-part2.py DadosPPGI/config.json
 ```
 
 **O que faz:**
-1. Lê o arquivo de ocorrências definido por `arquivo_publicacoes_ocorrencias`
-2. Para cada docente:
+1. Executa uma pré-verificação das revisões de Qualis e deduplicação.
+2. Lê o arquivo de ocorrências definido por `arquivo_publicacoes_ocorrencias` somente se a pré-verificação permitir a pontuação.
+3. Para cada docente:
    - Agrupa as produções por estrato Qualis
    - Verifica a produção mínima (periódicos A1-A4 no intervalo especificado)
    - Calcula a nota segundo os valores definidos no `config-pontuacao.json`
    - Valida se atende aos critérios mínimos
-3. Gera os arquivos de saída
+4. Gera os arquivos de saída
 
 **Saídas geradas:**
 - `DadosPPGI/saida/<ano>_docente.csv`: Pontuação individual de cada docente
   - Colunas: Docente, Bolsista de Produtividade, Nota Docente, Produção Mínima, Validação de Regras
-- `DadosPPGI/saida/<ano>_grupo.csv`: Pontuação geral do grupo/programa. Não é gerado quando há revisão Qualis pendente no intervalo.
+- `DadosPPGI/saida/<ano>_grupo.csv`: Pontuação geral do grupo/programa.
+- `DadosPPGI/saida/<ano>_execucao.json`: estado atômico da execução.
+
+### Pré-verificação e estado da execução
+
+A Parte 2 verifica revisões antes de calcular notas. Uma revisão Qualis de
+conferência no intervalo da nota bloqueia a execução. Uma revisão de
+deduplicação que tenha uma ocorrência no intervalo da nota também bloqueia a
+execução. As resoluções existentes em
+`publicacoes_deduplicacao_overrides.csv` são aplicadas antes dessa verificação.
+
+Quando há bloqueio, o comando termina com código `2`. Ele mostra as quantidades
+de bloqueios, os caminhos de `*_qualis_revisao.csv` e
+`*_deduplicacao_revisao.csv`, e o caminho do manifesto. Ele não publica CSVs
+de pontuação novos. A resolução manual de Qualis é trabalho do Plano 2.
+
+O manifesto `<ano>_execucao.json` contém `schema_versao`, `status`, horários,
+caminho da configuração, hashes SHA-256 das entradas, detalhes dos bloqueios,
+relatórios publicados e hashes, ou dados do erro. Os estados são
+`EM_EXECUCAO`, `SUCESSO`, `BLOQUEADO_REVISAO` e `ERRO`.
+
+Os CSVs de pontuação existentes sempre representam a última execução com
+sucesso. Eles são atuais somente quando o manifesto informa `SUCESSO` e os
+hashes das entradas no manifesto correspondem aos arquivos de entrada atuais.
+
+Os códigos de saída são:
+
+- `0`: sucesso.
+- `2`: revisões pendentes que bloqueiam a pontuação.
+- `1`: erro inesperado.
+
+### Decisões Qualis
+
+As ocorrências usam o schema `2`. Cada conferência tem `qualis_input_id`,
+`qualis_evento_id` e `qualis_registro_id`. Eles identificam, nesta ordem, o
+texto informado, o evento oficial e a classificação no quadriênio.
+
+O sistema aceita automaticamente um nome oficial exato ou uma sigla única que
+seja compatível com o nome informado. Acrônimos ambíguos, conflitos entre nome
+e sigla, e tipos incompatíveis vão para revisão. Um registro de outro
+quadriênio também exige revisão e não fornece estrato até uma decisão manual.
+
+`arquivo_overrides_qualis` aponta para `DadosPPGI/input/qualis_overrides.csv`.
+O arquivo tem este cabeçalho:
+
+```text
+schema_versao,qualis_input_id,acao,qualis_registro_id,justificativa,decidido_por,decidido_em,politica_versao
+```
+
+Use `ASSOCIAR` com um ID de registro da fila, ou `SEM_CORRESPONDENCIA` sem ID.
+Copie uma decisão revista para esse arquivo. Não use a fila de revisão como
+entrada. A classificação vem sempre da base Qualis, nunca do arquivo manual.
 
 ### Métricas externas (opcional)
 
@@ -103,14 +155,13 @@ cd PPGI
 python main-metricas.py DadosPPGI/config-metricas.json
 ```
 
-Use `--offline` para exportar somente dados do cache SQLite. O comando consulta
-o Google Scholar como fonte principal de citações. Se o Scholar não resolver a
-publicação, o comando usa OpenAlex como fallback. Crossref valida identidades
-por DOI como fonte auxiliar.
+Use `--offline` para exportar somente dados do cache SQLite. O Google Scholar
+é a única fonte das citações do ranking. Scopus fornece indexação, citações e
+métricas de veículo como contexto. Crossref valida identidades por DOI.
 
-Cada contagem mantém o nome da fonte, o papel do provedor e o `snapshot_id`.
-Publicações ambíguas vão para `*_metricas_revisao.csv`. O arquivo
-`*_metricas_ranking.csv` mantém rankings separados por fonte.
+Cada resultado mantém o provedor e o `snapshot_id`. Publicações ambíguas vão
+para `*_metricas_revisao.csv`. O arquivo `*_metricas_ranking.csv` usa ranking
+denso por citações Google Scholar.
 
 ## 📊 Regras de Pontuação
 
@@ -221,6 +272,47 @@ Edite `DadosPPGI/config-pontuacao.json`:
 4. **Qualis não identificado**: Produções sem classificação Qualis aparecerão com a tag "Qualis não identificado" no CSV intermediário.
 
 5. **Classes compartilhadas**: Este sistema utiliza classes compartilhadas com o sistema PIIC, localizadas nas pastas `ArquivoInterno/` e `Classificador/`.
+
+## Deduplicação de publicações
+
+A Parte 1 é a única etapa que cria a identidade de uma publicação. Ela usa a
+política `POLITICA_V2` e publica ocorrências, canônicos, membros, decisões,
+revisão e o manifesto. O manifesto é publicado por último.
+
+`ocorrencia_id` usa o identificador Lattes, o tipo XML e
+`SEQUENCIA-PRODUCAO`. `conteudo_fingerprint` muda quando os dados
+bibliográficos mudam. `publicacao_canonica_id` é derivado dos membros. Ele
+muda quando os membros do grupo mudam.
+
+DOI válido igual é a evidência mais forte. DOI válido diferente, tipo diferente
+e ano diferente não agrupam automaticamente. Periódicos usam ISSN canônico.
+Conferências usam `qualis_evento_id`. Títulos genéricos também precisam de
+autores ou dados estruturais. Casos incertos entram na fila de revisão.
+
+Use o arquivo de overrides com o cabeçalho versionado. Cada linha precisa de
+IDs, fingerprints atuais, ação `AGRUPAR` ou `NAO_AGRUPAR`, justificativa e
+dados da decisão. Após mudar overrides, execute novamente a Parte 1. A Parte
+2 e as métricas verificam hashes no manifesto e param quando a saída está
+desatualizada ou há revisão pendente.
+
+Uma publicação canônica entra uma vez na nota do grupo. Cada docente membro
+recebe uma vez o crédito individual. Conflitos de estrato ou de registro Qualis
+ficam no registro canônico e bloqueiam a pontuação até revisão.
+
+## Métricas externas
+
+`main-metricas.py` cria um snapshot imutável. O snapshot guarda as entradas
+canônicas, os vínculos e as respostas usadas no relatório. Repetir a exportação
+de um snapshot não lê os CSV atuais e não consulta a rede.
+
+O estado final é `CONCLUIDO`, `PARCIAL` ou `FALHOU`. O comando retorna 0 para
+concluído, 2 para parcial e 1 para falha. Snapshots em execução ou falhos não
+podem ser exportados.
+
+OpenAlex requer a variável de ambiente indicada em
+`config-metricas.json`, por padrão `OPENALEX_API_KEY`. Não grave a chave no
+arquivo JSON. Google Scholar fica desabilitado por padrão. Quando habilitado,
+CAPTCHA ou HTTP 429 interrompe novas consultas Scholar nesta execução.
 
 ## 📝 Exemplo de Execução Completa
 

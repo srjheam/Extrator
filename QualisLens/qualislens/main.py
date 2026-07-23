@@ -24,7 +24,7 @@ import pandas as pd
 from .constants import STATUSES_REVISAO
 from .exporter import exportar_csv, exportar_fila_revisao, resumo_por_status, COLUNAS_OUTPUT
 from .llm_reviewer import revisar
-from .matcher import match
+from .matcher import match, validar_resultado
 from .qualis_db import get_db
 
 logging.basicConfig(
@@ -135,7 +135,16 @@ def _processar_linha(
         "llm_m2_confianca": llm_resultado.get("llm_m2_confianca"),
         "llm_m2_escolheu": llm_resultado.get("llm_m2_escolheu"),
     })
-    return saida
+    selecionado = next(
+        (candidato for candidato in candidatos
+         if candidato.get("sigla") == llm_resultado.get("qualis_sigla")
+         and candidato.get("nome") == llm_resultado.get("qualis_nome_oficial")),
+        None,
+    )
+    if selecionado:
+        saida["qualis_evento_id"] = selecionado.get("qualis_evento_id")
+        saida["qualis_registro_id"] = selecionado.get("qualis_registro_id")
+    return validar_resultado(saida)
 
 
 def executar(
@@ -177,6 +186,7 @@ def executar(
             logger.error("Erro inesperado na linha %d: %s", i, exc, exc_info=True)
             r = {k: None for k in COLUNAS_OUTPUT}
             r["qualis_status"] = "ERRO"
+            r["qualis_requer_revisao"] = True
             r["qualis_llm_motivo"] = str(exc)
         resultados.append(r)
 

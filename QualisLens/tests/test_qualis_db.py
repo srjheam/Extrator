@@ -74,6 +74,8 @@ class TestQualisDBCarga:
         assert "sigla_norm" in db.df.columns
         assert "nome_norm" in db.df.columns
         assert "acronimo" in db.df.columns
+        assert "qualis_evento_id" in db.df.columns
+        assert "qualis_registro_id" in db.df.columns
 
     def test_dois_quadrienios_presentes(self, db):
         quadrienios = set(db.df["quadrienio"].unique())
@@ -129,8 +131,13 @@ class TestQualisDBBuscar:
     def test_retorno_contem_campos_obrigatorios(self, db):
         result = db.buscar("SBRC", 2022, por_sigla=True)
         assert result is not None
-        for campo in ["sigla", "nome", "estrato", "quadrienio", "extrapolado", "campo_match"]:
+        for campo in ["sigla", "nome", "estrato", "quadrienio", "extrapolado", "campo_match", "qualis_evento_id", "qualis_registro_id"]:
             assert campo in result
+
+    def test_lookup_por_ids_estaveis(self, db):
+        result = db.buscar("SBRC", 2022, por_sigla=True)
+        record = db.get_by_record_id(result["qualis_registro_id"])
+        assert record["qualis_evento_id"] == result["qualis_evento_id"]
 
     def test_campo_match_sigla(self, db):
         result = db.buscar("SBRC", 2022, por_sigla=True)

@@ -123,8 +123,13 @@ Módulo para classificação de publicações usando o sistema Qualis CAPES.
 
 #### Arquivos de dados:
 
-- `qualis-unificado.csv`: Base unificada de periódicos.
+- `qualis-unificado.csv`: Projeção oficial de periódicos para a Parte 1.
+- `base/qualis_periodicos_2021_2024.csv`: Base canônica de periódicos.
 - `qualis_conferencias.csv`: Base de conferências.
+
+Use `QualisLens/scripts/atualizar_sucupira.py` para atualizar os eventos e os
+periódicos oficiais. Esse fluxo não adiciona aliases de ISSN do Scopus, JCR ou
+de outras fontes.
 
 #### Exemplo de uso:
 
@@ -140,40 +145,6 @@ estrato = qualis_journal.get_estrato("1234-5678")  # Retorna "A1", "B2", etc.
 qualis_conf = QualisConferencia("Classificador/qualis_conferencias.csv")
 estrato = qualis_conf.get_estrato("International Conference on Software Engineering")
 ```
-
----
-
-### QualisNovo
-
-Módulo para criação e atualização de arquivos Qualis unificados.
-
-#### Componentes:
-
-**`criaArquivoQualis.py`**
-- Script para gerar o arquivo `qualis-unificado.csv`
-- Integra múltiplas fontes de dados:
-  - Classificações oficiais CAPES.
-  - Lista de ISSNs (print e eletrônico).
-  - Impact Factor.
-  - Dados do Scopus/CiteScore.
-- Faz associação entre ISSN impresso e ISSN eletrônico.
-- Agrupa por ISSN e mantém o melhor estrato quando há duplicatas.
-
-#### Arquivos de entrada:
-
-- `classificaЗфes_publicadas_todas_as_areas_avaliacao*.csv`: Classificações oficiais CAPES.
-- `issn_list_xlsx.csv`: Lista de ISSNs e suas variações.
-- `ImpactFactor2024.csv`: Dados de Impact Factor.
-- `ISSNJson/`: JSONs com dados do Scopus CiteScore.
-
-#### Como usar:
-
-```bash
-cd QualisNovo
-python criaArquivoQualis.py classificaЗфes_publicadas_todas_as_areas_avaliacao1672761192111.csv
-```
-
-Saída: `qualis-unificado.csv` (usado pelo módulo Classificador).
 
 ---
 

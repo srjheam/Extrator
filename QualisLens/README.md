@@ -11,11 +11,30 @@ estrato. A API legada é `QualisConferencia.get_match(venue, ano, sigla=None)` e
 `get_estrato(venue, ano=None, sigla=None)`. Sem ano, ela avisa depreciação e usa
 a semântica legada 2017-2020.
 
-As bases canônicas ficam em `base/`. Use
-`python QualisLens/scripts/import_sucupira_csv.py oficial.csv base/qualis_2017_2020.csv`
-para importar CSV oficial. `base/metadata.json` registra origem e contagem.
-`Classificador/qualis_conferencias.csv` é caminho histórico compatível; o PPGI
-o redireciona para a fonte canônica.
+As bases canônicas ficam em `base/`. O comando abaixo atualiza os eventos e os
+periódicos oficiais do quadriênio 2021–2024:
+
+```bash
+.venv/bin/python QualisLens/scripts/atualizar_sucupira.py \
+  --area COMPUTAÇÃO \
+  --quadrienio 2021-2024
+```
+
+O comando usa somente a Plataforma Sucupira. Ele valida os dois XLSX antes de
+publicar os arquivos. Uma falha preserva as bases anteriores.
+
+Use os XLSX já baixados para repetir a conversão sem rede:
+
+```bash
+.venv/bin/python QualisLens/scripts/atualizar_sucupira.py \
+  --offline \
+  --eventos-xlsx caminho/eventos.xlsx \
+  --periodicos-xlsx caminho/periodicos.xlsx
+```
+
+`base/metadata.json` registra a origem, os hashes e as contagens. O arquivo
+`Classificador/qualis-unificado.csv` mantém o contrato de duas colunas usado
+pela Parte 1. A atualização não adiciona aliases externos de ISSN.
 
 ---
 

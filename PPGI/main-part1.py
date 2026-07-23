@@ -1,5 +1,7 @@
 import os
 import sys
+import hashlib
+import json
 
 # Adiciona o diretório pai aos caminhos de importação
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -23,7 +25,7 @@ if __name__ == '__main__':
     # 1. reading
     docentes = []
     qualis_journal = Qualis(ppgi_config['qualis_j'])
-    qualis_conferencia = QualisConferencia(ppgi_config['qualis_c'])
+    qualis_conferencia = QualisConferencia(ppgi_config['qualis_c'], overrides_path=ppgi_config['overrides_qualis'])
     
     with open(ppgi_config['lista_file']) as f:
         for line in f:
@@ -50,3 +52,18 @@ if __name__ == '__main__':
     ppgiu.gera_deduplicacao_csvs(ppgi_config['dir_out'], prefixo, resultado)
     revisao_nome = str(ppgi_config['ano_fim_conferencia']) + '_qualis_revisao.csv'
     ppgiu.gera_qualis_revisao_csv(os.path.join(ppgi_config['dir_out'], revisao_nome), docentes)
+    # Publish this file last. Consumers use it as the completion marker.
+    files = [f'{prefixo}_publicacoes_ocorrencias.csv', f'{prefixo}_publicacoes_unicas.csv',
+             f'{prefixo}_publicacoes_membros.csv', f'{prefixo}_deduplicacao_decisoes.csv',
+             f'{prefixo}_deduplicacao_revisao.csv']
+    def digest(path):
+        with open(path, 'rb') as stream: return hashlib.sha256(stream.read()).hexdigest()
+    out = ppgi_config['dir_out']
+    manifest = {'schema_versao': '3', 'politica_versao': '2',
+                'arquivos': {name: digest(os.path.join(out, name)) for name in files},
+                'sha256_overrides_deduplicacao': digest(ppgi_config['overrides_deduplicacao']),
+                'quantidade_revisoes': len(resultado.revisoes), 'quantidade_ocorrencias': len(resultado.ocorrencias),
+                'quantidade_publicacoes_canonicas': len(resultado.publicacoes_unicas),
+                'status': 'REVISAO_PENDENTE' if resultado.revisoes else 'SUCESSO', 'metricas': resultado.metricas}
+    with open(os.path.join(out, f'{prefixo}_deduplicacao_manifest.json'), 'w', encoding='utf-8') as stream:
+        json.dump(manifest, stream, ensure_ascii=False, indent=2, sort_keys=True)
