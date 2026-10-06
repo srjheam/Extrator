@@ -9,3 +9,7 @@ PPGI/DadosPPGI/saida/*.sqlite-wal
 PPGI/DadosPPGI/saida/.part1-*
 PPGI/DadosPPGI/saida/.part2-*
 .qualis-sucupira-*
+
+# Currículos Lattes (dados pessoais) e saídas de execução.
+PPGI/DadosPPGI/curriculos-*/
+PPGI/DadosPPGI/saida-*/

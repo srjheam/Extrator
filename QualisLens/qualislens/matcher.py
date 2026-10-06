@@ -368,8 +368,14 @@ def _resultado(
     observacoes: Optional[list[str]] = None,
     precisa_llm: bool = False,
 ) -> dict:
+    # Usa sigla_informada (o valor bruto recebido), não sigla_original (que
+    # pode ter sido extraída do próprio nome). QualisConferencia.get_match
+    # calcula a chave de busca de overrides com o mesmo sigla bruto recebido
+    # do chamador; usar o valor pós-extração aqui faria o ID reportado ao
+    # humano divergir da chave realmente usada na busca de overrides sempre
+    # que o texto do evento contivesse uma sigla extraível (ex.: "SC24: ...").
     result = {
-        "qualis_input_id": qualis_input_id(pre.get("venue_informado", pre.get("nome_original", "")), pre.get("ano", 0), pre.get("sigla_original")),
+        "qualis_input_id": qualis_input_id(pre.get("venue_informado", pre.get("nome_original", "")), pre.get("ano", 0), pre.get("sigla_informada")),
         "qualis_evento_id": evento_id,
         "qualis_registro_id": registro_id,
         "qualis_estrato": estrato,

@@ -341,6 +341,9 @@ def preprocessar_linha(
     -------
     dict
         Dicionário com as chaves:
+        - ``sigla_informada``: valor bruto de ``sigla_entrada``, sem fallback
+          por extração; usado para reproduzir a identidade do input reportado
+          (``qualis_input_id``) de forma estável entre chamadas
         - ``sigla_original``: sigla fornecida pelo pesquisador (ou extraída)
         - ``nome_original``: nome limpo (sem sigla prefixada)
         - ``sigla_norm``: sigla normalizada para busca
@@ -381,6 +384,7 @@ def preprocessar_linha(
 
     return {
         "venue_informado": nome_conferencia,
+        "sigla_informada": sigla_entrada,
         "sigla_original": sigla_original,
         "siglas_candidatas": siglas_candidatas,
         "siglas_fortes": siglas_fortes,

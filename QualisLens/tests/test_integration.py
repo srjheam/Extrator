@@ -67,3 +67,38 @@ def test_legacy_api_returns_auditable_contract():
     resultado = QualisConferencia().get_match("International Conference on Software Engineering", 2023, "ICSE")
     assert {"estrato", "evento_oficial", "sigla_oficial", "quadrienio", "metodo", "score_primeiro", "margem_segundo", "candidatos", "motivo", "necessita_revisao"} <= set(resultado)
     assert resultado["estrato"] == "A1"
+
+
+def test_override_applies_when_venue_embeds_extractable_sigla(tmp_path):
+    """Regressão: o qualis_input_id reportado na fila de revisão precisa ser
+    o mesmo usado na busca de override, mesmo quando o texto do evento
+    contém um token que o pré-processador extrai como sigla (ex.: "SC24:
+    Workshops of ..."). Antes da correção, o ID reportado usava a sigla
+    extraída e o ID de busca usava a sigla bruta (None aqui), então um
+    override escrito com o ID visto pelo humano nunca era encontrado.
+    """
+    venue = "SC24: Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis"
+    ano = 2024
+
+    sem_override = QualisConferencia()
+    resultado_inicial = sem_override.get_match(venue, ano)
+    input_id = resultado_inicial["qualis_input_id"]
+    assert resultado_inicial["necessita_revisao"] is True
+
+    overrides_path = tmp_path / "qualis_overrides.csv"
+    with overrides_path.open("w", newline="", encoding="utf-8") as arquivo:
+        escritor = csv.writer(arquivo)
+        escritor.writerow([
+            "schema_versao", "qualis_input_id", "acao", "qualis_registro_id",
+            "justificativa", "decidido_por", "decidido_em", "politica_versao",
+        ])
+        escritor.writerow([
+            "1", input_id, "SEM_CORRESPONDENCIA", "",
+            "evento nao consta na base local", "teste", "2026-01-01T00:00:00-03:00", "2",
+        ])
+
+    com_override = QualisConferencia(overrides_path=str(overrides_path))
+    resultado_final = com_override.get_match(venue, ano)
+
+    assert resultado_final["metodo"] == "MANUAL_MISS"
+    assert resultado_final["necessita_revisao"] is False
